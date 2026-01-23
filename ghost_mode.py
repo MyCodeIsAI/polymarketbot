@@ -695,6 +695,15 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
     price = Decimal(str(trade.get('price', 0)))
     usdc_size = Decimal(str(trade.get('usdcSize', 0)))
 
+    # CRITICAL: Skip trades with no price data (e.g. blockchain-detected trades)
+    # Blockchain monitoring detects trades fast but cannot determine price
+    # We need API polling data for actual execution
+    if price <= 0 or usdc_size <= 0:
+        is_blockchain = trade.get('_blockchain_detected', False)
+        source = "blockchain" if is_blockchain else "API"
+        print(f"  [SKIP] {source} trade has no price/size data - waiting for API polling: {market_name[:40]}")
+        return
+
     # Calculate our position size
     our_size = min(
         usdc_size * account.position_ratio,
@@ -873,11 +882,12 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
             from py_clob_client.client import ClobClient
             from py_clob_client.clob_types import OrderArgs, OrderType
 
-            # Initialize client with auth
+            # Initialize client with auth AND funder address (proxy wallet)
             client = ClobClient(
                 host="https://clob.polymarket.com",
                 key=ghost_state._private_key,
                 chain_id=137,  # Polygon mainnet
+                funder=ghost_state._funder_address,  # Proxy wallet that holds the funds
             )
 
             # Build order args
