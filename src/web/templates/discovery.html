@@ -1,0 +1,3161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account Discovery - PolymarketBot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .score-bar { transition: width 0.3s ease; }
+        .card-hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3); }
+        .scan-progress { background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%); transition: width 0.5s ease; }
+
+        /* Trader row hover effects - stable, no layout shifts */
+        .trader-row {
+            transition: background-color 0.15s ease;
+            will-change: background-color;
+        }
+        .trader-row:hover { background-color: rgba(59, 130, 246, 0.1) !important; }
+        .trader-row:hover .wallet-link { color: #60a5fa; }
+        .trader-row .score-indicator { transition: none; }
+        .trader-row td { vertical-align: middle; }
+
+        /* Score colors */
+        .score-excellent { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
+        .score-good { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); }
+        .score-moderate { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+        .score-low { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+
+        /* Tooltip styles */
+        .tooltip-trigger { position: relative; cursor: help; }
+        .tooltip-trigger .tooltip-content {
+            visibility: hidden;
+            opacity: 0;
+            position: absolute;
+            z-index: 50;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 8px 12px;
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            font-size: 12px;
+            white-space: nowrap;
+            transition: all 0.15s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            margin-bottom: 8px;
+        }
+        .tooltip-trigger:hover .tooltip-content {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        /* Preset buttons */
+        .preset-btn { transition: all 0.15s ease; }
+        .preset-btn:hover { transform: translateY(-1px); }
+        .preset-btn.active { ring: 2px solid #3b82f6; }
+
+        /* Activity indicator */
+        .activity-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .activity-hot { background: #10b981; box-shadow: 0 0 8px #10b981; }
+        .activity-warm { background: #f59e0b; }
+        .activity-cold { background: #6b7280; }
+        .activity-dead { background: #374151; }
+
+        /* PnL trend indicator */
+        .trend-up { color: #10b981; }
+        .trend-down { color: #ef4444; }
+        .trend-flat { color: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <h1 class="text-xl font-bold text-blue-400">PolymarketBot</h1>
+                <div class="flex items-center space-x-2 ml-4 border-l border-gray-700 pl-4">
+                    <a href="/" class="text-sm text-gray-400 hover:text-white px-3 py-1 rounded hover:bg-gray-700 transition">Dashboard</a>
+                    <a href="/discovery" class="text-sm text-white font-medium px-3 py-1 bg-gray-700 rounded transition flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                        Discovery
+                    </a>
+                </div>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span id="stats-badge" class="text-sm text-gray-400">
+                    <span id="total-discovered">0</span> accounts discovered
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-6 py-8">
+        <!-- Header -->
+        <div class="mb-6">
+            <h2 class="text-2xl font-bold text-white mb-2">Account Discovery</h2>
+            <p class="text-gray-400">Find consistently profitable, active traders for copy-trading</p>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- INITIAL SCAN - SIMPLIFIED UI -->
+        <!-- ========================================== -->
+        <div id="initial-scan-section" class="bg-gray-800 rounded-lg border border-gray-700 p-6 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h3 class="text-lg font-semibold text-white">Scan for Profitable Traders</h3>
+                    <p class="text-sm text-gray-400 mt-1">Collect accounts from Polymarket leaderboards, then analyze their trading history</p>
+                </div>
+                <div id="scan-status" class="hidden">
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-600/20 text-blue-400">
+                        <svg class="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <span id="scan-status-text">Scanning...</span>
+                    </span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                <!-- Min Profit -->
+                <div>
+                    <div class="flex items-center mb-2">
+                        <label class="text-sm text-gray-400">Minimum Profit ($)</label>
+                        <span class="tooltip-trigger ml-1">
+                            <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <div class="tooltip-content">Only collect accounts with at least this much total profit</div>
+                        </span>
+                    </div>
+                    <input type="number" id="min-profit" value="5000" min="100"
+                           class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white text-lg font-medium focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                    <p class="mt-1 text-xs text-gray-500">Recommended: $5,000+</p>
+                </div>
+
+                <!-- Max Accounts -->
+                <div>
+                    <div class="flex items-center mb-2">
+                        <label class="text-sm text-gray-400">Max Accounts to Collect</label>
+                        <span class="tooltip-trigger ml-1">
+                            <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <div class="tooltip-content">Stop collecting after this many accounts</div>
+                        </span>
+                    </div>
+                    <input type="number" id="max-accounts" value="500" min="50" max="10000"
+                           class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white text-lg font-medium focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                    <p class="mt-1 text-xs text-gray-500">More = slower but more thorough</p>
+                </div>
+
+                <!-- Trades to Analyze -->
+                <div>
+                    <div class="flex items-center mb-2">
+                        <label class="text-sm text-gray-400">Trades per Account</label>
+                        <span class="tooltip-trigger ml-1">
+                            <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <div class="tooltip-content">How many trades to fetch for each account (more = better P/L curve analysis)</div>
+                        </span>
+                    </div>
+                    <select id="trades-limit" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white text-lg font-medium focus:border-blue-500 focus:outline-none">
+                        <option value="100">100 (Fast)</option>
+                        <option value="250">250 (Balanced)</option>
+                        <option value="500" selected>500 (Recommended)</option>
+                        <option value="1000">1,000 (Thorough)</option>
+                        <option value="2000">2,000 (Deep Analysis)</option>
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500">More trades = better accuracy</p>
+                </div>
+
+                <!-- Start Button -->
+                <div>
+                    <div class="flex items-center mb-2">
+                        <label class="text-sm text-gray-400">&nbsp;</label>
+                    </div>
+                    <button id="start-scan-btn" class="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition flex items-center justify-center text-lg">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                        Start Scan
+                    </button>
+                    <button id="cancel-scan-btn" class="hidden w-full mt-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition">
+                        Cancel Scan
+                    </button>
+                    <p class="mt-1 text-xs text-gray-500">&nbsp;</p>
+                </div>
+            </div>
+
+            <!-- Scan Progress (hidden until scanning) -->
+            <div id="scan-progress-container" class="hidden">
+                <div class="flex justify-between text-sm mb-2">
+                    <span id="progress-step" class="text-gray-400">Initializing...</span>
+                    <span id="progress-stats" class="text-gray-400">0 accounts</span>
+                </div>
+                <div class="h-3 bg-gray-700 rounded-full overflow-hidden">
+                    <div id="progress-bar" class="h-full scan-progress" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- SMART FILTER FUNNEL - Step-by-step filtering -->
+        <!-- ========================================== -->
+        <div id="filter-funnel" class="hidden bg-gray-800 rounded-lg border border-gray-700 p-6 mb-6">
+            <div class="mb-4">
+                <h3 class="text-lg font-semibold text-white flex items-center">
+                    <svg class="w-5 h-5 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
+                    </svg>
+                    Smart Filter: Find Your Copy-Trade Candidates
+                </h3>
+                <p class="text-sm text-gray-400 mt-1">Each filter progressively narrows down to the best systematic traders</p>
+            </div>
+
+            <!-- Funnel Visualization -->
+            <div class="bg-gray-900/50 rounded-lg p-4 mb-6">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs text-gray-500 uppercase tracking-wide">Filter Funnel</span>
+                    <span class="text-sm text-gray-400">
+                        <span id="funnel-input" class="font-bold text-white">0</span> accounts
+                        <span class="mx-2">→</span>
+                        <span id="funnel-output" class="font-bold text-green-400">0</span> candidates
+                    </span>
+                </div>
+
+                <!-- Funnel Steps -->
+                <div class="space-y-3" id="funnel-steps">
+                    <!-- Step 1: Activity -->
+                    <div class="flex items-center gap-3 funnel-step" data-step="activity">
+                        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-sm">1</div>
+                        <div class="flex-1">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm font-medium text-white">Still Trading?</span>
+                                <span class="text-xs text-gray-500">Removes inactive accounts</span>
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button class="funnel-btn active px-3 py-1 text-xs rounded-full bg-blue-500/20 border border-blue-500/50 text-blue-400 hover:bg-blue-500/30" data-filter="activity" data-value="any">
+                                    All <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-blue-500/50" data-filter="activity" data-value="30">
+                                    30 days <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-blue-500/50" data-filter="activity" data-value="14">
+                                    14 days <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-blue-500/50" data-filter="activity" data-value="7">
+                                    7 days <span class="funnel-count"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Risk Control -->
+                    <div class="flex items-center gap-3 funnel-step" data-step="risk">
+                        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center text-green-400 font-bold text-sm">2</div>
+                        <div class="flex-1">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm font-medium text-white">Risk Control</span>
+                                <span class="text-xs text-gray-500">Max peak-to-trough loss</span>
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button class="funnel-btn active px-3 py-1 text-xs rounded-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30" data-filter="maxdd" data-value="100">
+                                    Any <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-green-500/50" data-filter="maxdd" data-value="25">
+                                    &lt;25% <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-green-500/50" data-filter="maxdd" data-value="15">
+                                    &lt;15% <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-green-500/50" data-filter="maxdd" data-value="10">
+                                    &lt;10% <span class="funnel-count"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Track Record -->
+                    <div class="flex items-center gap-3 funnel-step" data-step="experience">
+                        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-400 font-bold text-sm">3</div>
+                        <div class="flex-1">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm font-medium text-white">Track Record</span>
+                                <span class="text-xs text-gray-500">Enough trades to trust</span>
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button class="funnel-btn active px-3 py-1 text-xs rounded-full bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/30" data-filter="trades" data-value="0">
+                                    Any <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-yellow-500/50" data-filter="trades" data-value="20">
+                                    20+ <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-yellow-500/50" data-filter="trades" data-value="50">
+                                    50+ <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-yellow-500/50" data-filter="trades" data-value="100">
+                                    100+ <span class="funnel-count"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 4: Quality Score -->
+                    <div class="flex items-center gap-3 funnel-step" data-step="score">
+                        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400 font-bold text-sm">4</div>
+                        <div class="flex-1">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm font-medium text-white">Quality Score</span>
+                                <span class="text-xs text-gray-500">Our systematic rating</span>
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button class="funnel-btn active px-3 py-1 text-xs rounded-full bg-purple-500/20 border border-purple-500/50 text-purple-400 hover:bg-purple-500/30" data-filter="score" data-value="0">
+                                    Any <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-purple-500/50" data-filter="score" data-value="50">
+                                    50+ <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-purple-500/50" data-filter="score" data-value="65">
+                                    65+ <span class="funnel-count"></span>
+                                </button>
+                                <button class="funnel-btn px-3 py-1 text-xs rounded-full bg-gray-700 border border-gray-600 text-gray-300 hover:border-purple-500/50" data-filter="score" data-value="80">
+                                    80+ <span class="funnel-count"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Apply Funnel Button -->
+                <div class="flex items-center justify-between mt-4 pt-4 border-t border-gray-700">
+                    <button id="reset-funnel" class="text-sm text-gray-400 hover:text-white">Reset All Filters</button>
+                    <button id="apply-funnel" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition font-medium">
+                        Show <span id="funnel-result-count">0</span> Candidates
+                    </button>
+                </div>
+            </div>
+
+            <!-- Quick Stats Summary -->
+            <div class="grid grid-cols-4 gap-3 mb-6">
+                <div class="bg-gray-700/30 rounded-lg p-3 text-center">
+                    <div class="text-xl font-bold text-white" id="qs-total">-</div>
+                    <div class="text-xs text-gray-500">Total Collected</div>
+                </div>
+                <div class="bg-gray-700/30 rounded-lg p-3 text-center">
+                    <div class="text-xl font-bold text-green-400" id="qs-active">-</div>
+                    <div class="text-xs text-gray-500">Active (14d)</div>
+                </div>
+                <div class="bg-gray-700/30 rounded-lg p-3 text-center">
+                    <div class="text-xl font-bold text-blue-400" id="qs-lowrisk">-</div>
+                    <div class="text-xs text-gray-500">Low Risk (&lt;15% DD)</div>
+                </div>
+                <div class="bg-gray-700/30 rounded-lg p-3 text-center">
+                    <div class="text-xl font-bold text-purple-400" id="qs-quality">-</div>
+                    <div class="text-xs text-gray-500">Quality (65+)</div>
+                </div>
+            </div>
+
+            <!-- Show More Options Toggle -->
+            <div class="text-center">
+                <button id="show-presets-toggle" class="text-sm text-gray-400 hover:text-white flex items-center mx-auto">
+                    <span>More Filtering Options</span>
+                    <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- FILTER PANEL - Advanced Presets (hidden by default) -->
+        <!-- ========================================== -->
+        <div id="filter-panel" class="hidden bg-gray-800 rounded-lg border border-gray-700 p-6 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h3 class="text-lg font-semibold text-white">Advanced Filter Presets</h3>
+                    <p class="text-sm text-gray-400">Pre-configured filters for specific trading styles</p>
+                </div>
+                <button id="toggle-advanced-filters" class="text-sm text-blue-400 hover:text-blue-300 flex items-center">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
+                    </svg>
+                    Fine-Tune Filters
+                </button>
+            </div>
+
+            <!-- COMPREHENSIVE FILTERING PRESETS -->
+            <div class="mb-6">
+                <!-- Risk Tolerance -->
+                <div class="mb-4">
+                    <div class="flex items-center mb-2">
+                        <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide mr-2">Risk Tolerance</span>
+                        <span class="tooltip-trigger">
+                            <svg class="w-3 h-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <div class="tooltip-content">How much drawdown can you stomach? Lower = safer but potentially lower returns</div>
+                        </span>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button class="preset-btn px-3 py-1.5 bg-emerald-600/20 border border-emerald-500/50 text-emerald-400 rounded-lg hover:bg-emerald-600/30 transition text-sm" data-preset="ultra-safe">
+                            <span class="font-medium">Ultra Safe</span>
+                            <span class="text-xs block text-emerald-300/60">&lt;5% max drawdown</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-green-600/20 border border-green-500/50 text-green-400 rounded-lg hover:bg-green-600/30 transition text-sm" data-preset="conservative">
+                            <span class="font-medium">Conservative</span>
+                            <span class="text-xs block text-green-300/60">&lt;10% max drawdown</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-yellow-600/20 border border-yellow-500/50 text-yellow-400 rounded-lg hover:bg-yellow-600/30 transition text-sm" data-preset="balanced">
+                            <span class="font-medium">Balanced</span>
+                            <span class="text-xs block text-yellow-300/60">&lt;20% max drawdown</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-orange-600/20 border border-orange-500/50 text-orange-400 rounded-lg hover:bg-orange-600/30 transition text-sm" data-preset="risk-tolerant">
+                            <span class="font-medium">Risk Tolerant</span>
+                            <span class="text-xs block text-orange-300/60">&lt;35% max drawdown</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Trading Style -->
+                <div class="mb-4">
+                    <div class="flex items-center mb-2">
+                        <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide mr-2">Trading Style</span>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button class="preset-btn px-3 py-1.5 bg-blue-600/20 border border-blue-500/50 text-blue-400 rounded-lg hover:bg-blue-600/30 transition text-sm" data-preset="steady-eddie">
+                            <span class="font-medium">Steady Eddie</span>
+                            <span class="text-xs block text-blue-300/60">Smooth P/L, consistent gains</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-purple-600/20 border border-purple-500/50 text-purple-400 rounded-lg hover:bg-purple-600/30 transition text-sm" data-preset="high-conviction">
+                            <span class="font-medium">High Conviction</span>
+                            <span class="text-xs block text-purple-300/60">Big wins, fewer trades</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-cyan-600/20 border border-cyan-500/50 text-cyan-400 rounded-lg hover:bg-cyan-600/30 transition text-sm" data-preset="diversified">
+                            <span class="font-medium">Diversified</span>
+                            <span class="text-xs block text-cyan-300/60">Many markets, spread risk</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-pink-600/20 border border-pink-500/50 text-pink-400 rounded-lg hover:bg-pink-600/30 transition text-sm" data-preset="sniper">
+                            <span class="font-medium">Sniper</span>
+                            <span class="text-xs block text-pink-300/60">High win rate, selective</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Activity Level -->
+                <div class="mb-4">
+                    <div class="flex items-center mb-2">
+                        <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide mr-2">Activity Level</span>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button class="preset-btn px-3 py-1.5 bg-red-600/20 border border-red-500/50 text-red-400 rounded-lg hover:bg-red-600/30 transition text-sm" data-preset="hot-hands">
+                            <span class="font-medium">Hot Hands</span>
+                            <span class="text-xs block text-red-300/60">Traded today/yesterday</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-amber-600/20 border border-amber-500/50 text-amber-400 rounded-lg hover:bg-amber-600/30 transition text-sm" data-preset="active-weekly">
+                            <span class="font-medium">Active Weekly</span>
+                            <span class="text-xs block text-amber-300/60">5+ trades per week</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-lime-600/20 border border-lime-500/50 text-lime-400 rounded-lg hover:bg-lime-600/30 transition text-sm" data-preset="swing-trader">
+                            <span class="font-medium">Swing Trader</span>
+                            <span class="text-xs block text-lime-300/60">Active but patient</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Account Size -->
+                <div class="mb-4">
+                    <div class="flex items-center mb-2">
+                        <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide mr-2">Account Size</span>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button class="preset-btn px-3 py-1.5 bg-yellow-600/20 border border-yellow-500/50 text-yellow-400 rounded-lg hover:bg-yellow-600/30 transition text-sm" data-preset="whales">
+                            <span class="font-medium">Whales</span>
+                            <span class="text-xs block text-yellow-300/60">$100k+ profit</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-indigo-600/20 border border-indigo-500/50 text-indigo-400 rounded-lg hover:bg-indigo-600/30 transition text-sm" data-preset="established">
+                            <span class="font-medium">Established</span>
+                            <span class="text-xs block text-indigo-300/60">$50k-$100k profit</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-teal-600/20 border border-teal-500/50 text-teal-400 rounded-lg hover:bg-teal-600/30 transition text-sm" data-preset="rising-stars">
+                            <span class="font-medium">Rising Stars</span>
+                            <span class="text-xs block text-teal-300/60">$20k-$50k, high potential</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-violet-600/20 border border-violet-500/50 text-violet-400 rounded-lg hover:bg-violet-600/30 transition text-sm" data-preset="small-fish">
+                            <span class="font-medium">Small Fish</span>
+                            <span class="text-xs block text-violet-300/60">$5k-$20k, under radar</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Special Filters -->
+                <div class="mb-2">
+                    <div class="flex items-center mb-2">
+                        <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide mr-2">Special Filters</span>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button class="preset-btn px-3 py-1.5 bg-emerald-600/20 border border-emerald-500/50 text-emerald-400 rounded-lg hover:bg-emerald-600/30 transition text-sm" data-preset="never-blown">
+                            <span class="font-medium">Never Blown Up</span>
+                            <span class="text-xs block text-emerald-300/60">No severe drawdowns</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-sky-600/20 border border-sky-500/50 text-sky-400 rounded-lg hover:bg-sky-600/30 transition text-sm" data-preset="quick-recovery">
+                            <span class="font-medium">Quick Recovery</span>
+                            <span class="text-xs block text-sky-300/60">Bounces back fast</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-fuchsia-600/20 border border-fuchsia-500/50 text-fuchsia-400 rounded-lg hover:bg-fuchsia-600/30 transition text-sm" data-preset="top-scorers">
+                            <span class="font-medium">Top Scorers</span>
+                            <span class="text-xs block text-fuchsia-300/60">Score 85+</span>
+                        </button>
+                        <button class="preset-btn px-3 py-1.5 bg-gray-600/20 border border-gray-500/50 text-gray-400 rounded-lg hover:bg-gray-600/30 transition text-sm" data-preset="all">
+                            <span class="font-medium">Clear All</span>
+                            <span class="text-xs block text-gray-300/60">Reset filters</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Advanced Filters (collapsible) -->
+            <div id="advanced-filters" class="hidden border-t border-gray-700 pt-4">
+                <!-- Row 1: Core Filters -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <!-- Activity Filter -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Activity Recency</label>
+                            <span class="tooltip-trigger ml-1">
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="tooltip-content">Must have traded within this many days</div>
+                            </span>
+                        </div>
+                        <select id="filter-activity" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                            <option value="any" selected>Any</option>
+                            <option value="1">Today</option>
+                            <option value="2">Last 2 days</option>
+                            <option value="7">Last 7 days</option>
+                            <option value="14">Last 14 days</option>
+                            <option value="30">Last 30 days</option>
+                            <option value="90">Last 90 days</option>
+                        </select>
+                    </div>
+
+                    <!-- Min Score -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Minimum Score</label>
+                            <span class="tooltip-trigger ml-1">
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="tooltip-content">Composite score (0-100) based on activity, win rate, drawdowns, consistency</div>
+                            </span>
+                        </div>
+                        <input type="number" id="filter-min-score" value="0" min="0" max="100"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    </div>
+
+                    <!-- Min Trades -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Minimum Trades</label>
+                            <span class="tooltip-trigger ml-1">
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="tooltip-content">More trades = more reliable data about their strategy</div>
+                            </span>
+                        </div>
+                        <input type="number" id="filter-min-trades" value="0" min="0"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    </div>
+
+                    <!-- Min Unique Markets -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Min Markets</label>
+                            <span class="tooltip-trigger ml-1">
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="tooltip-content">Number of different markets traded - higher = more diversified</div>
+                            </span>
+                        </div>
+                        <input type="number" id="filter-min-markets" value="0" min="0"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    </div>
+                </div>
+
+                <!-- Row 2: Drawdown Filters (CRITICAL) -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <!-- Max Drawdown (Primary) -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Max Drawdown %</label>
+                            <span class="tooltip-trigger ml-1">
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="tooltip-content">Worst peak-to-trough decline. 5% = very safe, 30% = risky</div>
+                            </span>
+                        </div>
+                        <input type="number" id="filter-max-drawdown" value="100" min="0" max="100"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    </div>
+
+                    <!-- Avg Drawdown -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Avg Drawdown %</label>
+                            <span class="tooltip-trigger ml-1">
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="tooltip-content">Average of all drawdowns - shows typical losing streak severity</div>
+                            </span>
+                        </div>
+                        <input type="number" id="filter-avg-drawdown" value="" placeholder="No limit" min="0" max="100"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    </div>
+
+                    <!-- Max Severe Drawdowns -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Max Severe DDs</label>
+                            <span class="tooltip-trigger ml-1">
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="tooltip-content">Number of times they had 15%+ drawdowns. 0 = never blown up</div>
+                            </span>
+                        </div>
+                        <input type="number" id="filter-severe-drawdowns" value="" placeholder="No limit" min="0"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    </div>
+
+                    <!-- P/L Curve Smoothness -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Min Smoothness</label>
+                            <span class="tooltip-trigger ml-1">
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="tooltip-content">P/L curve smoothness (0-1). Higher = steadier growth, no big swings</div>
+                            </span>
+                        </div>
+                        <input type="number" id="filter-smoothness" value="" placeholder="No limit" min="0" max="1" step="0.1"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    </div>
+                </div>
+
+                <!-- Row 3: Profit Filters -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <!-- Min Profit -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Min Profit ($)</label>
+                        </div>
+                        <input type="number" id="filter-min-profit" value="5000" min="0"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    </div>
+
+                    <!-- Max Profit (for small fish) -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Max Profit ($)</label>
+                            <span class="tooltip-trigger ml-1">
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="tooltip-content">Cap profit to find smaller traders flying under radar</div>
+                            </span>
+                        </div>
+                        <input type="number" id="filter-max-profit" value="" placeholder="No limit"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    </div>
+
+                    <!-- Win Rate -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Min Win Rate %</label>
+                        </div>
+                        <input type="number" id="filter-win-rate" value="0" min="0" max="100"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    </div>
+
+                    <!-- Profit Factor -->
+                    <div>
+                        <div class="flex items-center mb-2">
+                            <label class="text-sm text-gray-400">Min Profit Factor</label>
+                            <span class="tooltip-trigger ml-1">
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="tooltip-content">Gross profit / gross loss. 1.5+ is good, 2+ is excellent</div>
+                            </span>
+                        </div>
+                        <input type="number" id="filter-profit-factor" value="" placeholder="No limit" min="0" step="0.1"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    </div>
+                </div>
+
+                <div class="flex justify-end mt-4">
+                    <button id="apply-filters-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition">
+                        Apply Filters
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- RESULTS TABLE - Analyzed Accounts -->
+        <!-- ========================================== -->
+        <div id="analyzed-overview" class="bg-gray-800 rounded-lg border border-gray-700 p-6 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h3 class="text-lg font-semibold text-white">Discovered Traders</h3>
+                    <p class="text-sm text-gray-400">Click any trader to view detailed analysis. Higher score = better copy-trade candidate.</p>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button id="show-watchlist-btn" class="text-sm text-yellow-400 hover:text-yellow-300 flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                        Watchlist (<span id="watchlist-count">0</span>)
+                    </button>
+                    <div class="flex items-center space-x-2 text-sm">
+                        <span class="text-gray-500">Dismissed: <span id="dismissed-count" class="text-red-400">0</span></span>
+                        <button id="toggle-hide-dismissed" onclick="toggleHideDismissed()" class="text-xs px-2 py-1 rounded bg-gray-600 text-gray-300">
+                            Show Dismissed
+                        </button>
+                    </div>
+                    <button id="export-csv-btn" class="text-sm text-gray-400 hover:text-white flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
+                        Export CSV
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats Overview -->
+            <div class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
+                <div class="stat-filter cursor-pointer bg-gray-700/50 hover:bg-gray-700 rounded-lg p-4 transition-all border-2 border-transparent hover:border-blue-500"
+                     data-filter="all" data-active="true">
+                    <div class="text-gray-400 text-xs mb-1">Total Traders</div>
+                    <div id="stat-total" class="text-2xl font-bold text-white">-</div>
+                </div>
+                <div class="stat-filter cursor-pointer bg-gray-700/50 hover:bg-gray-700 rounded-lg p-4 transition-all border-2 border-transparent hover:border-green-500"
+                     data-filter="score90">
+                    <div class="text-gray-400 text-xs mb-1">Score 90+</div>
+                    <div id="stat-score-90" class="text-2xl font-bold text-green-400">-</div>
+                    <div class="text-gray-500 text-xs mt-1">Excellent</div>
+                </div>
+                <div class="stat-filter cursor-pointer bg-gray-700/50 hover:bg-gray-700 rounded-lg p-4 transition-all border-2 border-transparent hover:border-blue-500"
+                     data-filter="score80">
+                    <div class="text-gray-400 text-xs mb-1">Score 80-89</div>
+                    <div id="stat-score-80" class="text-2xl font-bold text-blue-400">-</div>
+                    <div class="text-gray-500 text-xs mt-1">Strong</div>
+                </div>
+                <div class="stat-filter cursor-pointer bg-gray-700/50 hover:bg-gray-700 rounded-lg p-4 transition-all border-2 border-transparent hover:border-yellow-500"
+                     data-filter="pnl1m">
+                    <div class="text-gray-400 text-xs mb-1">$1M+ Profit</div>
+                    <div id="stat-1m" class="text-2xl font-bold text-yellow-400">-</div>
+                </div>
+                <div class="stat-filter cursor-pointer bg-gray-700/50 hover:bg-gray-700 rounded-lg p-4 transition-all border-2 border-transparent hover:border-cyan-500"
+                     data-filter="active7d">
+                    <div class="text-gray-400 text-xs mb-1">Active (7d)</div>
+                    <div id="stat-active" class="text-2xl font-bold text-cyan-400">-</div>
+                </div>
+                <div class="stat-filter cursor-pointer bg-gray-700/50 hover:bg-gray-700 rounded-lg p-4 transition-all border-2 border-transparent hover:border-purple-500"
+                     data-filter="smallfish">
+                    <div class="text-gray-400 text-xs mb-1">Small Fish</div>
+                    <div id="stat-smallfish" class="text-2xl font-bold text-purple-400">-</div>
+                    <div class="text-gray-500 text-xs mt-1">$5k-$50k</div>
+                </div>
+            </div>
+
+            <!-- Active Filter Indicator -->
+            <div id="active-filter-bar" class="hidden mb-4 p-3 bg-blue-900/30 border border-blue-500/50 rounded-lg flex items-center justify-between">
+                <span class="text-sm text-blue-300">
+                    <span class="font-medium">Active filter:</span> <span id="active-filter-name">All</span>
+                </span>
+                <button id="clear-filter-btn" class="text-xs text-blue-400 hover:text-blue-300">Clear filter</button>
+            </div>
+
+            <!-- Sorting and Search -->
+            <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+                <div class="flex items-center space-x-3">
+                    <select id="analyzed-sort" class="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                        <option value="systematic_score">Sort by Score</option>
+                        <option value="total_pnl">Sort by PnL</option>
+                        <option value="max_drawdown_pct">Sort by Max Drawdown (lowest first)</option>
+                        <option value="profit_factor">Sort by Profit Factor</option>
+                        <option value="pl_curve_smoothness">Sort by P/L Smoothness</option>
+                        <option value="win_rate">Sort by Win Rate</option>
+                        <option value="trades_last_7d">Sort by 7d Activity</option>
+                        <option value="activity_recency_days">Sort by Last Trade</option>
+                        <option value="num_trades">Sort by Total Trades</option>
+                    </select>
+                    <input type="text" id="wallet-search" placeholder="Search trader..."
+                           class="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm w-48">
+                </div>
+                <div class="text-sm text-gray-400">
+                    Showing <span id="analyzed-showing">0</span> of <span id="analyzed-total">0</span> accounts
+                </div>
+            </div>
+
+            <!-- Results Table with Visual Indicators -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-gray-400 text-left border-b border-gray-700">
+                            <th class="pb-3 pl-2 font-medium w-8"></th>
+                            <th class="pb-3 font-medium">Trader</th>
+                            <th class="pb-3 font-medium text-right cursor-pointer hover:text-white" data-sort="systematic_score">
+                                Score
+                                <span class="tooltip-trigger ml-1">
+                                    <svg class="w-3 h-3 text-gray-500 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                    <div class="tooltip-content">Composite score: activity + drawdowns + consistency + win rate</div>
+                                </span>
+                            </th>
+                            <th class="pb-3 font-medium text-right cursor-pointer hover:text-white" data-sort="total_pnl">Total PnL</th>
+                            <th class="pb-3 font-medium text-right cursor-pointer hover:text-white" data-sort="max_drawdown_pct">
+                                MaxDD
+                                <span class="tooltip-trigger ml-1">
+                                    <svg class="w-3 h-3 text-gray-500 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                    <div class="tooltip-content">Maximum drawdown %: worst peak-to-trough decline</div>
+                                </span>
+                            </th>
+                            <th class="pb-3 font-medium text-right cursor-pointer hover:text-white" data-sort="num_trades">Trades</th>
+                            <th class="pb-3 font-medium text-right cursor-pointer hover:text-white" data-sort="trades_last_7d">7d</th>
+                            <th class="pb-3 font-medium text-right cursor-pointer hover:text-white" data-sort="activity_recency_days">Last Trade</th>
+                            <th class="pb-3 font-medium text-center">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="analyzed-accounts-table" class="divide-y divide-gray-700">
+                        <!-- Dynamically populated -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            <div class="flex items-center justify-center mt-4 space-x-2">
+                <button id="prev-page-btn" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm disabled:opacity-50" disabled>
+                    ← Prev
+                </button>
+                <span id="page-info" class="text-sm text-gray-400">Page 1</span>
+                <button id="next-page-btn" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm">
+                    Next →
+                </button>
+            </div>
+        </div>
+
+        <!-- Empty State -->
+        <div id="empty-state" class="text-center py-16">
+            <svg class="w-16 h-16 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+            <h3 class="text-lg font-medium text-gray-400 mb-2">No accounts discovered yet</h3>
+            <p class="text-gray-500">Configure your scan parameters above and click "Start Scan" to find profitable traders</p>
+        </div>
+
+        <!-- Watchlist Panel (hidden by default) -->
+        <div id="watchlist-panel" class="hidden bg-gray-800 rounded-lg border border-yellow-500/30 p-6 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold text-yellow-400 flex items-center">
+                    <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    Watchlist
+                </h3>
+                <button id="close-watchlist-btn" class="text-gray-400 hover:text-white">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div id="watchlist-content" class="space-y-2">
+                <p class="text-gray-400 text-sm">No accounts in watchlist yet. Click the star icon on any trader to add.</p>
+            </div>
+        </div>
+
+        <!-- Account Detail Modal -->
+        <div id="detail-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+            <div class="bg-gray-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+                <div class="flex items-center justify-between p-6 border-b border-gray-700 flex-shrink-0">
+                    <div>
+                        <div class="flex items-center gap-3">
+                            <h3 id="modal-username" class="text-lg font-bold text-white"></h3>
+                            <span id="modal-trader-type" class="px-2 py-0.5 rounded text-xs font-medium"></span>
+                        </div>
+                        <div id="modal-wallet" class="text-sm text-gray-400 font-mono mt-1"></div>
+                        <div id="modal-score-badge" class="mt-2"></div>
+                    </div>
+                    <button id="close-modal" class="text-gray-400 hover:text-white">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="p-6 overflow-y-auto flex-1 min-h-0">
+                    <!-- Overview Stats -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div class="bg-gray-700 rounded-lg p-4">
+                            <div class="text-gray-400 text-xs mb-1">Total Trades</div>
+                            <div id="modal-total-trades" class="text-xl font-bold text-white">-</div>
+                        </div>
+                        <div class="bg-gray-700 rounded-lg p-4">
+                            <div class="text-gray-400 text-xs mb-1">Total P/L</div>
+                            <div id="modal-total-pnl" class="text-xl font-bold text-white">-</div>
+                        </div>
+                        <div class="bg-gray-700 rounded-lg p-4">
+                            <div class="text-gray-400 text-xs mb-1">Win Rate</div>
+                            <div id="modal-win-rate" class="text-xl font-bold text-white">-</div>
+                        </div>
+                        <div class="bg-gray-700 rounded-lg p-4">
+                            <div class="text-gray-400 text-xs mb-1">Profit Factor</div>
+                            <div id="modal-profit-factor" class="text-xl font-bold text-white">-</div>
+                        </div>
+                    </div>
+
+                    <!-- Data Refresh Hint -->
+                    <div id="modal-refresh-hint" class="hidden mb-4 p-3 bg-yellow-900/30 border border-yellow-700/50 rounded-lg flex items-center justify-between">
+                        <div class="flex items-center text-yellow-400 text-sm">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                            </svg>
+                            Metrics incomplete. Click "Fetch Full Data" to analyze.
+                        </div>
+                        <button id="modal-fetch-data-btn" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition">
+                            Fetch Full Data
+                        </button>
+                    </div>
+
+                    <!-- Drawdown Metrics (NEW) -->
+                    <div class="mb-6">
+                        <h4 class="text-sm font-medium text-gray-300 mb-3">Risk & Drawdown Metrics</h4>
+                        <div id="modal-drawdown" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div class="bg-gray-700 rounded-lg p-3">
+                                <div class="text-gray-400 text-xs">Max Drawdown</div>
+                                <div id="modal-max-dd" class="text-lg font-bold text-white">-</div>
+                            </div>
+                            <div class="bg-gray-700 rounded-lg p-3">
+                                <div class="text-gray-400 text-xs">Avg Drawdown</div>
+                                <div id="modal-avg-dd" class="text-lg font-bold text-white">-</div>
+                            </div>
+                            <div class="bg-gray-700 rounded-lg p-3">
+                                <div class="text-gray-400 text-xs">Severe DDs (>15%)</div>
+                                <div id="modal-severe-dd" class="text-lg font-bold text-white">-</div>
+                            </div>
+                            <div class="bg-gray-700 rounded-lg p-3">
+                                <div class="text-gray-400 text-xs">P/L Smoothness</div>
+                                <div id="modal-smoothness" class="text-lg font-bold text-white">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Score Breakdown -->
+                    <div class="mb-6">
+                        <h4 class="text-sm font-medium text-gray-300 mb-3">Score Components</h4>
+                        <div id="modal-score-breakdown" class="space-y-2"></div>
+                    </div>
+
+                    <!-- Activity Analysis -->
+                    <div class="mb-6">
+                        <h4 class="text-sm font-medium text-gray-300 mb-3">Activity Analysis</h4>
+                        <div id="modal-activity" class="grid grid-cols-3 gap-4">
+                            <div class="bg-gray-700 rounded-lg p-3">
+                                <div class="text-gray-400 text-xs">Last 7 Days</div>
+                                <div id="modal-7d-trades" class="text-lg font-bold text-white">-</div>
+                            </div>
+                            <div class="bg-gray-700 rounded-lg p-3">
+                                <div class="text-gray-400 text-xs">Last 30 Days</div>
+                                <div id="modal-30d-trades" class="text-lg font-bold text-white">-</div>
+                            </div>
+                            <div class="bg-gray-700 rounded-lg p-3">
+                                <div class="text-gray-400 text-xs">Last Trade</div>
+                                <div id="modal-last-trade" class="text-lg font-bold text-white">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- P/L Chart Placeholder -->
+                    <div class="mb-6">
+                        <div class="flex items-center justify-between mb-3">
+                            <h4 class="text-sm font-medium text-gray-300">P/L Curve</h4>
+                            <span class="text-xs text-gray-500 italic">Estimated from metrics</span>
+                        </div>
+                        <div class="bg-gray-700 rounded-lg p-4 h-48 flex items-center justify-center text-gray-500">
+                            <canvas id="pl-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Positions Snapshot (NEW) -->
+                    <div class="mb-6">
+                        <div class="flex items-center justify-between mb-3">
+                            <h4 class="text-sm font-medium text-gray-300">Current Positions</h4>
+                            <button id="modal-refresh-positions" class="text-xs text-blue-400 hover:text-blue-300">Refresh</button>
+                        </div>
+                        <div id="modal-positions-container" class="space-y-2">
+                            <div class="text-sm text-gray-500 text-center py-4">Click "Refresh" to load current positions</div>
+                        </div>
+                    </div>
+
+                    <!-- Category Breakdown (NEW) -->
+                    <div class="mb-6">
+                        <h4 class="text-sm font-medium text-gray-300 mb-3">Trading Categories</h4>
+                        <div id="modal-categories" class="flex flex-wrap gap-2"></div>
+                    </div>
+                </div>
+
+                <!-- Modal Actions -->
+                <div class="flex items-center justify-between p-6 border-t border-gray-700 bg-gray-800 flex-shrink-0">
+                    <div class="flex items-center space-x-4">
+                        <button id="modal-watchlist" class="flex items-center text-gray-400 hover:text-yellow-400 transition">
+                            <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
+                            </svg>
+                            Add to Watchlist
+                        </button>
+                        <button id="modal-dismiss" class="flex items-center text-gray-400 hover:text-red-400 transition">
+                            <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
+                            </svg>
+                            <span id="modal-dismiss-text">Dismiss</span>
+                        </button>
+                    </div>
+                    <a id="modal-polymarket-link" href="#" target="_blank" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition">
+                        View on Polymarket
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =====================================================================
+        // State Management
+        // =====================================================================
+        let currentScanId = null;
+        let scanPollInterval = null;
+        let analyzedAccounts = [];
+        let filteredAccounts = [];
+        let currentPage = 1;
+        let pageSize = 50;
+        let currentSort = 'systematic_score';
+        let sortDirection = 'desc';
+        let currentModalAccount = null;
+        let watchlist = JSON.parse(localStorage.getItem('discovery_watchlist') || '[]');
+        let dismissed = JSON.parse(localStorage.getItem('discovery_dismissed') || '[]');
+        let hideDismissed = JSON.parse(localStorage.getItem('discovery_hide_dismissed') ?? 'true');
+        let plChart = null;
+        let usernameCache = {};  // Cache for wallet -> username mappings
+
+        // =====================================================================
+        // DOM Elements
+        // =====================================================================
+        const startScanBtn = document.getElementById('start-scan-btn');
+        const cancelScanBtn = document.getElementById('cancel-scan-btn');
+        const scanStatus = document.getElementById('scan-status');
+        const scanStatusText = document.getElementById('scan-status-text');
+        const progressContainer = document.getElementById('scan-progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressStep = document.getElementById('progress-step');
+        const progressStats = document.getElementById('progress-stats');
+        const filterPanel = document.getElementById('filter-panel');
+        const advancedFilters = document.getElementById('advanced-filters');
+        const emptyState = document.getElementById('empty-state');
+
+        // =====================================================================
+        // Event Listeners
+        // =====================================================================
+        startScanBtn.addEventListener('click', startScan);
+        cancelScanBtn.addEventListener('click', cancelScan);
+        document.getElementById('close-modal').addEventListener('click', closeModal);
+        document.getElementById('toggle-advanced-filters').addEventListener('click', () => {
+            advancedFilters.classList.toggle('hidden');
+        });
+        document.getElementById('apply-filters-btn').addEventListener('click', applyFilters);
+        document.getElementById('analyzed-sort').addEventListener('change', (e) => {
+            currentSort = e.target.value;
+            renderAnalyzedTable();
+        });
+        document.getElementById('wallet-search').addEventListener('input', renderAnalyzedTable);
+        document.getElementById('clear-filter-btn').addEventListener('click', clearQuickFilter);
+        document.getElementById('show-watchlist-btn').addEventListener('click', toggleWatchlist);
+        document.getElementById('close-watchlist-btn').addEventListener('click', () => {
+            document.getElementById('watchlist-panel').classList.add('hidden');
+        });
+        document.getElementById('export-csv-btn').addEventListener('click', exportToCSV);
+        document.getElementById('modal-fetch-data-btn').addEventListener('click', fetchFullDataForModal);
+        document.getElementById('modal-dismiss').addEventListener('click', () => {
+            if (currentModalAccount) {
+                toggleDismissed(currentModalAccount.wallet_address);
+            }
+        });
+
+        // Preset buttons
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+        });
+
+        // Smart Funnel buttons
+        document.querySelectorAll('.funnel-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const filter = btn.dataset.filter;
+                const value = btn.dataset.value;
+
+                // Update active state within this filter group
+                btn.parentElement.querySelectorAll('.funnel-btn').forEach(b => {
+                    b.classList.remove('active');
+                    b.classList.remove('bg-blue-500/20', 'bg-green-500/20', 'bg-yellow-500/20', 'bg-purple-500/20');
+                    b.classList.remove('border-blue-500/50', 'border-green-500/50', 'border-yellow-500/50', 'border-purple-500/50');
+                    b.classList.remove('text-blue-400', 'text-green-400', 'text-yellow-400', 'text-purple-400');
+                    b.classList.add('bg-gray-700', 'border-gray-600', 'text-gray-300');
+                });
+                btn.classList.add('active');
+                btn.classList.remove('bg-gray-700', 'border-gray-600', 'text-gray-300');
+
+                // Add appropriate color based on filter type
+                if (filter === 'activity') {
+                    btn.classList.add('bg-blue-500/20', 'border-blue-500/50', 'text-blue-400');
+                } else if (filter === 'maxdd') {
+                    btn.classList.add('bg-green-500/20', 'border-green-500/50', 'text-green-400');
+                } else if (filter === 'trades') {
+                    btn.classList.add('bg-yellow-500/20', 'border-yellow-500/50', 'text-yellow-400');
+                } else if (filter === 'score') {
+                    btn.classList.add('bg-purple-500/20', 'border-purple-500/50', 'text-purple-400');
+                }
+
+                updateFunnelCounts();
+            });
+        });
+
+        // Apply funnel button
+        document.getElementById('apply-funnel')?.addEventListener('click', applyFunnelFilters);
+        document.getElementById('reset-funnel')?.addEventListener('click', resetFunnelFilters);
+        document.getElementById('show-presets-toggle')?.addEventListener('click', () => {
+            const filterPanel = document.getElementById('filter-panel');
+            filterPanel.classList.toggle('hidden');
+        });
+
+        // Stat filter clicks
+        document.querySelectorAll('.stat-filter').forEach(stat => {
+            stat.addEventListener('click', () => applyQuickFilter(stat.dataset.filter));
+        });
+
+        // Table header sorting
+        document.querySelectorAll('th[data-sort]').forEach(th => {
+            th.addEventListener('click', () => {
+                const sortKey = th.dataset.sort;
+                if (currentSort === sortKey) {
+                    sortDirection = sortDirection === 'desc' ? 'asc' : 'desc';
+                } else {
+                    currentSort = sortKey;
+                    sortDirection = 'desc';
+                }
+                document.getElementById('analyzed-sort').value = sortKey;
+                renderAnalyzedTable();
+            });
+        });
+
+        // Pagination
+        document.getElementById('prev-page-btn').addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                renderAnalyzedTable();
+            }
+        });
+        document.getElementById('next-page-btn').addEventListener('click', () => {
+            const maxPage = Math.ceil(filteredAccounts.length / pageSize);
+            if (currentPage < maxPage) {
+                currentPage++;
+                renderAnalyzedTable();
+            }
+        });
+
+        // =====================================================================
+        // Scan Functions
+        // =====================================================================
+        async function startScan() {
+            const minProfit = parseInt(document.getElementById('min-profit').value) || 5000;
+            const maxAccounts = parseInt(document.getElementById('max-accounts').value) || 500;
+            const tradesLimit = parseInt(document.getElementById('trades-limit').value) || 500;
+
+            const config = {
+                mode: 'wide_net_profitability',
+                min_profit: minProfit,
+                max_candidates: maxAccounts,
+                trades_limit: tradesLimit,
+                persist_to_db: true
+            };
+
+            try {
+                startScanBtn.disabled = true;
+                startScanBtn.innerHTML = '<svg class="animate-spin -ml-1 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>Starting...';
+
+                const response = await fetch('/api/discovery/scan/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    // Handle FastAPI validation errors (detail is an array)
+                    let errorMsg = 'Failed to start scan';
+                    if (error.detail) {
+                        if (Array.isArray(error.detail)) {
+                            errorMsg = error.detail.map(e => e.msg || JSON.stringify(e)).join(', ');
+                        } else if (typeof error.detail === 'string') {
+                            errorMsg = error.detail;
+                        } else {
+                            errorMsg = JSON.stringify(error.detail);
+                        }
+                    }
+                    throw new Error(errorMsg);
+                }
+
+                const data = await response.json();
+                currentScanId = data.scan_id;
+
+                // Show progress UI
+                scanStatus.classList.remove('hidden');
+                progressContainer.classList.remove('hidden');
+                cancelScanBtn.classList.remove('hidden');
+                startScanBtn.classList.add('hidden');
+
+                // Start polling
+                scanPollInterval = setInterval(pollScanStatus, 1000);
+
+            } catch (error) {
+                alert('Failed to start scan: ' + error.message);
+                resetScanUI();
+            }
+        }
+
+        async function pollScanStatus() {
+            if (!currentScanId) return;
+
+            try {
+                const response = await fetch(`/api/discovery/scan/${currentScanId}`);
+                const data = await response.json();
+
+                progressBar.style.width = data.progress_pct + '%';
+                progressStep.textContent = data.current_step;
+                progressStats.textContent = `${data.candidates_found} accounts collected`;
+                scanStatusText.textContent = data.current_step.substring(0, 40);
+
+                if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+                    clearInterval(scanPollInterval);
+                    scanPollInterval = null;
+
+                    if (data.status === 'completed') {
+                        // Load results (which will show the smart funnel)
+                        await loadAnalyzedAccounts();
+                    }
+
+                    resetScanUI();
+                }
+
+            } catch (error) {
+                console.error('Failed to poll scan status:', error);
+            }
+        }
+
+        async function cancelScan() {
+            if (!currentScanId) return;
+            try {
+                await fetch(`/api/discovery/scan/${currentScanId}/cancel`, { method: 'POST' });
+                clearInterval(scanPollInterval);
+                resetScanUI();
+            } catch (error) {
+                console.error('Failed to cancel scan:', error);
+            }
+        }
+
+        function resetScanUI() {
+            startScanBtn.disabled = false;
+            startScanBtn.innerHTML = '<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>Start Scan';
+            startScanBtn.classList.remove('hidden');
+            cancelScanBtn.classList.add('hidden');
+            scanStatus.classList.add('hidden');
+            progressContainer.classList.add('hidden');
+            currentScanId = null;
+        }
+
+        // =====================================================================
+        // Load and Display Accounts
+        // =====================================================================
+        async function loadAnalyzedAccounts() {
+            try {
+                // Sync user prefs from server first
+                await loadUserPrefs();
+
+                // Load accounts (server filters dismissed if hideDismissed is true)
+                const url = `/api/discovery/analyzed-accounts?limit=10000&hide_dismissed=${hideDismissed}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                analyzedAccounts = data.accounts || [];
+
+                // Update dismissed count display
+                const dismissedCount = data.total_dismissed || 0;
+                const dismissedCountEl = document.getElementById('dismissed-count');
+                if (dismissedCountEl) dismissedCountEl.textContent = dismissedCount;
+
+                // Show the smart funnel if we have accounts
+                if (analyzedAccounts.length > 0) {
+                    document.getElementById('filter-funnel').classList.remove('hidden');
+                    updateFunnelCounts();
+                }
+
+                // Also load stats
+                await loadStats();
+
+                applyFilters();
+
+                // Fetch usernames for visible accounts (in background)
+                fetchUsernamesForAccounts(analyzedAccounts.slice(0, 100));
+
+            } catch (error) {
+                console.error('Failed to load accounts:', error);
+            }
+        }
+
+        async function loadUserPrefs() {
+            try {
+                const response = await fetch('/api/discovery/user-prefs');
+                if (response.ok) {
+                    const data = await response.json();
+                    const serverWatchlist = data.watchlist || [];
+                    const serverDismissed = data.dismissed || [];
+
+                    // Merge: prefer server if it has data, otherwise keep local
+                    if (serverWatchlist.length > 0) {
+                        watchlist = serverWatchlist;
+                    } else if (watchlist.length > 0) {
+                        // Local has data, server doesn't - sync local to server
+                        console.log('Syncing local watchlist to server');
+                        for (const w of watchlist) {
+                            fetch(`/api/discovery/watchlist/${w}`, { method: 'POST' }).catch(() => {});
+                        }
+                    }
+
+                    if (serverDismissed.length > 0) {
+                        dismissed = serverDismissed;
+                    } else if (dismissed.length > 0) {
+                        // Local has data, server doesn't - sync local to server
+                        console.log('Syncing local dismissed to server');
+                        for (const w of dismissed) {
+                            fetch(`/api/discovery/dismissed/${w}`, { method: 'POST' }).catch(() => {});
+                        }
+                    }
+
+                    // Save merged state to localStorage
+                    localStorage.setItem('discovery_watchlist', JSON.stringify(watchlist));
+                    localStorage.setItem('discovery_dismissed', JSON.stringify(dismissed));
+
+                    // Update UI counts
+                    document.getElementById('watchlist-count').textContent = watchlist.length;
+                    updateDismissedCount();
+                }
+            } catch (error) {
+                console.log('Failed to load user prefs from server, using localStorage');
+            }
+        }
+
+        async function fetchUsernamesForAccounts(accounts) {
+            // Get wallets that aren't in cache yet
+            const walletsToFetch = accounts
+                .map(a => a.wallet_address)
+                .filter(w => !usernameCache[w.toLowerCase()]);
+
+            if (walletsToFetch.length === 0) return;
+
+            try {
+                const response = await fetch('/api/discovery/profiles/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(walletsToFetch)
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    usernameCache = { ...usernameCache, ...data.profiles };
+                    // Update wallet displays in-place WITHOUT re-rendering entire table
+                    // This prevents the jittery click issue caused by DOM replacement during interaction
+                    updateWalletDisplaysInPlace();
+                }
+            } catch (error) {
+                console.log('Username fetch failed (non-critical):', error);
+            }
+        }
+
+        function updateWalletDisplaysInPlace() {
+            // Update just the wallet display cells without re-rendering the whole table
+            document.querySelectorAll('.trader-row').forEach(row => {
+                const wallet = row.dataset.wallet;
+                if (!wallet) return;
+
+                const username = usernameCache[wallet.toLowerCase()];
+                if (!username) return;
+
+                // Find the wallet display cell (second td > div > first child)
+                const walletCell = row.querySelector('td:nth-child(2) .flex');
+                if (!walletCell) return;
+
+                const walletLink = walletCell.querySelector('.wallet-link');
+                if (!walletLink) return;
+
+                // Check if already showing username
+                if (walletLink.textContent === username) return;
+
+                // Update to show username with short wallet below
+                const shortWallet = `${wallet.substring(0, 6)}...${wallet.substring(38)}`;
+                const inWatchlist = walletCell.querySelector('svg.text-yellow-400') !== null;
+                const starIcon = inWatchlist ? walletCell.querySelector('svg.text-yellow-400')?.parentElement?.outerHTML || '' : '';
+
+                walletCell.innerHTML = `
+                    <div class="flex flex-col">
+                        <span class="wallet-link text-sm text-white font-medium">${escapeHtml(username)}</span>
+                        <span class="text-xs text-gray-500 font-mono">${shortWallet}</span>
+                    </div>
+                    ${starIcon}
+                `;
+            });
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/discovery/analyzed-stats');
+                const stats = await response.json();
+
+                document.getElementById('stat-total').textContent = stats.total_analyzed || 0;
+                document.getElementById('stat-score-90').textContent = stats.score_90_plus || 0;
+                document.getElementById('stat-score-80').textContent = stats.score_80_89 || 0;
+                document.getElementById('stat-1m').textContent = stats.pnl_1m_plus || 0;
+                document.getElementById('stat-active').textContent = stats.active_7d || 0;
+                document.getElementById('stat-smallfish').textContent = stats.small_fish || 0;
+                document.getElementById('total-discovered').textContent = stats.total_analyzed || 0;
+
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+
+        // =====================================================================
+        // Filter Functions
+        // =====================================================================
+        function applyFilters() {
+            // Core filters
+            const activityFilter = document.getElementById('filter-activity').value;
+            const minScore = parseInt(document.getElementById('filter-min-score').value) || 0;
+            const minTrades = parseInt(document.getElementById('filter-min-trades').value) || 0;
+            const minMarkets = parseInt(document.getElementById('filter-min-markets').value) || 0;
+
+            // Drawdown filters (CRITICAL for risk management)
+            const maxDrawdown = parseInt(document.getElementById('filter-max-drawdown').value) || 100;
+            const avgDrawdownInput = document.getElementById('filter-avg-drawdown').value;
+            const maxAvgDrawdown = avgDrawdownInput ? parseFloat(avgDrawdownInput) : 100;
+            const severeDrawdownsInput = document.getElementById('filter-severe-drawdowns').value;
+            const maxSevereDrawdowns = severeDrawdownsInput ? parseInt(severeDrawdownsInput) : 999;
+            const smoothnessInput = document.getElementById('filter-smoothness').value;
+            const minSmoothness = smoothnessInput ? parseFloat(smoothnessInput) : 0;
+
+            // Profit filters
+            const minProfit = parseInt(document.getElementById('filter-min-profit').value) || 0;
+            const maxProfit = document.getElementById('filter-max-profit').value ? parseInt(document.getElementById('filter-max-profit').value) : Infinity;
+            const minWinRate = parseInt(document.getElementById('filter-win-rate').value) || 0;
+            const profitFactorInput = document.getElementById('filter-profit-factor').value;
+            const minProfitFactor = profitFactorInput ? parseFloat(profitFactorInput) : 0;
+
+            const searchTerm = document.getElementById('wallet-search').value.toLowerCase();
+
+            filteredAccounts = analyzedAccounts.filter(account => {
+                // Activity filter
+                if (activityFilter !== 'any') {
+                    const maxDays = parseInt(activityFilter);
+                    const recency = account.activity_recency_days || 999;
+                    if (recency > maxDays) return false;
+                }
+
+                // Score filter
+                const score = account.systematic_score || 0;
+                if (score < minScore) return false;
+
+                // Trades filter
+                const trades = account.num_trades || 0;
+                if (trades < minTrades) return false;
+
+                // Markets filter
+                const markets = account.unique_markets || 0;
+                if (markets < minMarkets) return false;
+
+                // Drawdown filters (using new enhanced metrics)
+                const maxDD = account.max_drawdown_pct || account.estimated_drawdown_pct || 0;
+                if (maxDD > maxDrawdown) return false;
+
+                const avgDD = account.avg_drawdown_pct || 0;
+                if (avgDD > maxAvgDrawdown) return false;
+
+                const severeCount = account.severe_drawdown_count || 0;
+                if (severeCount > maxSevereDrawdowns) return false;
+
+                const smoothness = account.pl_curve_smoothness || 0;
+                if (smoothness < minSmoothness) return false;
+
+                // Profit filter
+                const pnl = parseFloat(account.total_pnl) || 0;
+                if (pnl < minProfit || pnl > maxProfit) return false;
+
+                // Win rate filter
+                const winRate = (account.win_rate || 0) * 100;
+                if (winRate < minWinRate) return false;
+
+                // Profit factor filter
+                const profitFactor = account.profit_factor || 1;
+                if (profitFactor < minProfitFactor) return false;
+
+                // Search filter (search by wallet address or username)
+                if (searchTerm) {
+                    const username = usernameCache[account.wallet_address.toLowerCase()] || '';
+                    const matchesWallet = account.wallet_address.toLowerCase().includes(searchTerm);
+                    const matchesUsername = username.toLowerCase().includes(searchTerm);
+                    if (!matchesWallet && !matchesUsername) return false;
+                }
+
+                return true;
+            });
+
+            currentPage = 1;
+            renderAnalyzedTable();
+            updateFilteredCount();
+        }
+
+        // =====================================================================
+        // Smart Funnel Filtering
+        // =====================================================================
+        let funnelFilters = {
+            activity: 'any',
+            maxdd: 100,
+            trades: 0,
+            score: 0
+        };
+
+        function getFunnelFilteredAccounts() {
+            return analyzedAccounts.filter(account => {
+                // Activity filter
+                if (funnelFilters.activity !== 'any') {
+                    const maxDays = parseInt(funnelFilters.activity);
+                    const recency = account.activity_recency_days || 999;
+                    if (recency > maxDays) return false;
+                }
+
+                // Max drawdown filter
+                if (funnelFilters.maxdd < 100) {
+                    const maxDD = account.max_drawdown_pct || account.estimated_drawdown_pct || 0;
+                    if (maxDD > funnelFilters.maxdd) return false;
+                }
+
+                // Trade count filter
+                if (funnelFilters.trades > 0) {
+                    const trades = account.num_trades || 0;
+                    if (trades < funnelFilters.trades) return false;
+                }
+
+                // Score filter
+                if (funnelFilters.score > 0) {
+                    const score = account.systematic_score || 0;
+                    if (score < funnelFilters.score) return false;
+                }
+
+                return true;
+            });
+        }
+
+        function updateFunnelCounts() {
+            // Get current active filter values
+            document.querySelectorAll('.funnel-btn.active').forEach(btn => {
+                const filter = btn.dataset.filter;
+                const value = btn.dataset.value;
+                if (filter === 'activity') {
+                    funnelFilters.activity = value;
+                } else {
+                    funnelFilters[filter] = parseInt(value);
+                }
+            });
+
+            // Calculate counts for each filter option
+            const total = analyzedAccounts.length;
+
+            // Update input/output display
+            document.getElementById('funnel-input').textContent = total.toLocaleString();
+
+            const filtered = getFunnelFilteredAccounts();
+            document.getElementById('funnel-output').textContent = filtered.length.toLocaleString();
+            document.getElementById('funnel-result-count').textContent = filtered.length.toLocaleString();
+
+            // Update quick stats
+            document.getElementById('qs-total').textContent = total.toLocaleString();
+            document.getElementById('qs-active').textContent = analyzedAccounts.filter(a =>
+                (a.activity_recency_days || 999) <= 14).length.toLocaleString();
+            document.getElementById('qs-lowrisk').textContent = analyzedAccounts.filter(a =>
+                (a.max_drawdown_pct || a.estimated_drawdown_pct || 0) < 15).length.toLocaleString();
+            document.getElementById('qs-quality').textContent = analyzedAccounts.filter(a =>
+                (a.systematic_score || 0) >= 65).length.toLocaleString();
+
+            // Update counts on each button
+            document.querySelectorAll('.funnel-btn').forEach(btn => {
+                const filter = btn.dataset.filter;
+                const value = btn.dataset.value;
+                let count = 0;
+
+                // Temporarily apply this filter and count
+                const tempFilters = { ...funnelFilters };
+
+                if (filter === 'activity') {
+                    tempFilters.activity = value;
+                } else {
+                    tempFilters[filter] = parseInt(value);
+                }
+
+                count = analyzedAccounts.filter(account => {
+                    if (tempFilters.activity !== 'any') {
+                        const maxDays = parseInt(tempFilters.activity);
+                        if ((account.activity_recency_days || 999) > maxDays) return false;
+                    }
+                    if (tempFilters.maxdd < 100) {
+                        if ((account.max_drawdown_pct || account.estimated_drawdown_pct || 0) > tempFilters.maxdd) return false;
+                    }
+                    if (tempFilters.trades > 0) {
+                        if ((account.num_trades || 0) < tempFilters.trades) return false;
+                    }
+                    if (tempFilters.score > 0) {
+                        if ((account.systematic_score || 0) < tempFilters.score) return false;
+                    }
+                    return true;
+                }).length;
+
+                const countSpan = btn.querySelector('.funnel-count');
+                if (countSpan) {
+                    countSpan.textContent = `(${count})`;
+                }
+            });
+        }
+
+        function applyFunnelFilters() {
+            // Apply the funnel filters to the main filter inputs
+            if (funnelFilters.activity !== 'any') {
+                document.getElementById('filter-activity').value = funnelFilters.activity;
+            } else {
+                document.getElementById('filter-activity').value = 'any';
+            }
+
+            document.getElementById('filter-max-drawdown').value = funnelFilters.maxdd;
+            document.getElementById('filter-min-trades').value = funnelFilters.trades;
+            document.getElementById('filter-min-score').value = funnelFilters.score;
+
+            // Apply filters
+            applyFilters();
+
+            // Scroll to results
+            document.getElementById('analyzed-overview').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function resetFunnelFilters() {
+            funnelFilters = {
+                activity: 'any',
+                maxdd: 100,
+                trades: 0,
+                score: 0
+            };
+
+            // Reset button states
+            document.querySelectorAll('.funnel-btn').forEach(btn => {
+                const isFirst = btn === btn.parentElement.querySelector('.funnel-btn');
+                btn.classList.remove('active');
+                btn.classList.remove('bg-blue-500/20', 'bg-green-500/20', 'bg-yellow-500/20', 'bg-purple-500/20');
+                btn.classList.remove('border-blue-500/50', 'border-green-500/50', 'border-yellow-500/50', 'border-purple-500/50');
+                btn.classList.remove('text-blue-400', 'text-green-400', 'text-yellow-400', 'text-purple-400');
+                btn.classList.add('bg-gray-700', 'border-gray-600', 'text-gray-300');
+
+                if (isFirst) {
+                    btn.classList.add('active');
+                    btn.classList.remove('bg-gray-700', 'border-gray-600', 'text-gray-300');
+                    const filter = btn.dataset.filter;
+                    if (filter === 'activity') btn.classList.add('bg-blue-500/20', 'border-blue-500/50', 'text-blue-400');
+                    if (filter === 'maxdd') btn.classList.add('bg-green-500/20', 'border-green-500/50', 'text-green-400');
+                    if (filter === 'trades') btn.classList.add('bg-yellow-500/20', 'border-yellow-500/50', 'text-yellow-400');
+                    if (filter === 'score') btn.classList.add('bg-purple-500/20', 'border-purple-500/50', 'text-purple-400');
+                }
+            });
+
+            updateFunnelCounts();
+        }
+
+        function applyPreset(preset) {
+            // Highlight active preset
+            document.querySelectorAll('.preset-btn').forEach(btn => {
+                btn.classList.remove('ring-2', 'ring-white/50');
+            });
+            document.querySelector(`[data-preset="${preset}"]`)?.classList.add('ring-2', 'ring-white/50');
+
+            // Reset all filters to defaults first
+            resetFiltersToDefaults();
+
+            switch (preset) {
+                // ========== RISK TOLERANCE PRESETS ==========
+                case 'ultra-safe':
+                    // Ultra conservative: minimal drawdowns, smooth curves
+                    document.getElementById('filter-activity').value = '14';
+                    document.getElementById('filter-min-score').value = '70';
+                    document.getElementById('filter-max-drawdown').value = '5';
+                    document.getElementById('filter-avg-drawdown').value = '3';
+                    document.getElementById('filter-severe-drawdowns').value = '0';
+                    document.getElementById('filter-smoothness').value = '0.7';
+                    document.getElementById('filter-min-trades').value = '50';
+                    break;
+
+                case 'conservative':
+                    // Low risk: small drawdowns, good consistency
+                    document.getElementById('filter-activity').value = '14';
+                    document.getElementById('filter-min-score').value = '65';
+                    document.getElementById('filter-max-drawdown').value = '10';
+                    document.getElementById('filter-avg-drawdown').value = '5';
+                    document.getElementById('filter-severe-drawdowns').value = '0';
+                    document.getElementById('filter-smoothness').value = '0.5';
+                    break;
+
+                case 'balanced':
+                    // Balanced risk/reward
+                    document.getElementById('filter-activity').value = '14';
+                    document.getElementById('filter-min-score').value = '60';
+                    document.getElementById('filter-max-drawdown').value = '20';
+                    document.getElementById('filter-severe-drawdowns').value = '1';
+                    break;
+
+                case 'risk-tolerant':
+                    // Higher risk tolerance for potentially higher returns
+                    document.getElementById('filter-activity').value = '30';
+                    document.getElementById('filter-min-score').value = '55';
+                    document.getElementById('filter-max-drawdown').value = '35';
+                    document.getElementById('filter-min-profit').value = '20000';
+                    break;
+
+                // ========== TRADING STYLE PRESETS ==========
+                case 'steady-eddie':
+                    // Smooth, consistent growth - beautiful P/L curves
+                    document.getElementById('filter-activity').value = '14';
+                    document.getElementById('filter-min-score').value = '70';
+                    document.getElementById('filter-smoothness').value = '0.6';
+                    document.getElementById('filter-max-drawdown').value = '15';
+                    document.getElementById('filter-min-trades').value = '100';
+                    document.getElementById('filter-profit-factor').value = '1.3';
+                    break;
+
+                case 'high-conviction':
+                    // Fewer trades, bigger wins - quality over quantity
+                    document.getElementById('filter-activity').value = '30';
+                    document.getElementById('filter-min-score').value = '65';
+                    document.getElementById('filter-min-profit').value = '20000';
+                    document.getElementById('filter-win-rate').value = '55';
+                    document.getElementById('filter-profit-factor').value = '1.5';
+                    break;
+
+                case 'diversified':
+                    // Spread across many markets - lower concentration risk
+                    document.getElementById('filter-activity').value = '14';
+                    document.getElementById('filter-min-score').value = '65';
+                    document.getElementById('filter-min-markets').value = '25';
+                    document.getElementById('filter-min-trades').value = '100';
+                    break;
+
+                case 'sniper':
+                    // High win rate, selective traders
+                    document.getElementById('filter-activity').value = '14';
+                    document.getElementById('filter-min-score').value = '70';
+                    document.getElementById('filter-win-rate').value = '60';
+                    document.getElementById('filter-profit-factor').value = '1.5';
+                    break;
+
+                // ========== ACTIVITY LEVEL PRESETS ==========
+                case 'hot-hands':
+                    // Very recently active - traded in last 2 days
+                    document.getElementById('filter-activity').value = '2';
+                    document.getElementById('filter-min-score').value = '60';
+                    break;
+
+                case 'active-weekly':
+                    // Active weekly traders (5+ trades per week typical)
+                    document.getElementById('filter-activity').value = '7';
+                    document.getElementById('filter-min-score').value = '60';
+                    document.getElementById('filter-min-trades').value = '100';
+                    break;
+
+                case 'swing-trader':
+                    // Active but patient - not daily traders
+                    document.getElementById('filter-activity').value = '30';
+                    document.getElementById('filter-min-score').value = '65';
+                    document.getElementById('filter-min-markets').value = '10';
+                    break;
+
+                // ========== ACCOUNT SIZE PRESETS ==========
+                case 'whales':
+                    // Big players: $100k+ profit
+                    document.getElementById('filter-activity').value = '30';
+                    document.getElementById('filter-min-profit').value = '100000';
+                    document.getElementById('filter-min-score').value = '50';
+                    break;
+
+                case 'established':
+                    // Solid mid-tier: $50k-$100k
+                    document.getElementById('filter-activity').value = '14';
+                    document.getElementById('filter-min-profit').value = '50000';
+                    document.getElementById('filter-max-profit').value = '100000';
+                    document.getElementById('filter-min-score').value = '65';
+                    break;
+
+                case 'rising-stars':
+                    // Growing traders: $20k-$50k with high potential
+                    document.getElementById('filter-activity').value = '14';
+                    document.getElementById('filter-min-profit').value = '20000';
+                    document.getElementById('filter-max-profit').value = '50000';
+                    document.getElementById('filter-min-score').value = '70';
+                    document.getElementById('filter-max-drawdown').value = '20';
+                    break;
+
+                case 'small-fish':
+                    // Under the radar: bottom 25% PnL in dataset
+                    document.getElementById('filter-activity').value = '14';
+                    // Calculate 25th percentile threshold dynamically
+                    const pnlsSorted = analyzedAccounts.map(a => parseFloat(a.total_pnl) || 0).sort((a, b) => a - b);
+                    const threshold25 = pnlsSorted[Math.floor(pnlsSorted.length / 4)] || 100000;
+                    document.getElementById('filter-min-profit').value = '0';
+                    document.getElementById('filter-max-profit').value = Math.round(threshold25).toString();
+                    document.getElementById('filter-min-score').value = '70';
+                    break;
+
+                // ========== SPECIAL FILTERS ==========
+                case 'never-blown':
+                    // Never had a severe drawdown (>15%)
+                    document.getElementById('filter-activity').value = '30';
+                    document.getElementById('filter-min-score').value = '65';
+                    document.getElementById('filter-severe-drawdowns').value = '0';
+                    document.getElementById('filter-max-drawdown').value = '15';
+                    break;
+
+                case 'quick-recovery':
+                    // Bounces back fast from losses
+                    document.getElementById('filter-activity').value = '14';
+                    document.getElementById('filter-min-score').value = '70';
+                    document.getElementById('filter-smoothness').value = '0.5';
+                    document.getElementById('filter-profit-factor').value = '1.4';
+                    break;
+
+                case 'top-scorers':
+                    // Highest scoring accounts overall
+                    document.getElementById('filter-activity').value = '14';
+                    document.getElementById('filter-min-score').value = '85';
+                    break;
+
+                case 'all':
+                    // Clear all filters - already reset above
+                    break;
+            }
+
+            applyFilters();
+        }
+
+        function resetFiltersToDefaults() {
+            // Core filters
+            document.getElementById('filter-activity').value = 'any';
+            document.getElementById('filter-min-score').value = '0';
+            document.getElementById('filter-min-trades').value = '0';
+            document.getElementById('filter-min-markets').value = '0';
+
+            // Drawdown filters
+            document.getElementById('filter-max-drawdown').value = '100';
+            document.getElementById('filter-avg-drawdown').value = '';
+            document.getElementById('filter-severe-drawdowns').value = '';
+            document.getElementById('filter-smoothness').value = '';
+
+            // Profit filters
+            document.getElementById('filter-min-profit').value = '0';
+            document.getElementById('filter-max-profit').value = '';
+            document.getElementById('filter-win-rate').value = '0';
+            document.getElementById('filter-profit-factor').value = '';
+        }
+
+        function applyQuickFilter(filter) {
+            // Update visual state
+            document.querySelectorAll('.stat-filter').forEach(s => {
+                s.classList.remove('border-blue-500', 'border-green-500', 'border-yellow-500', 'border-cyan-500', 'border-purple-500');
+                s.classList.add('border-transparent');
+            });
+
+            const filterBar = document.getElementById('active-filter-bar');
+            const filterName = document.getElementById('active-filter-name');
+
+            if (filter === 'all') {
+                filterBar.classList.add('hidden');
+                applyPreset('all');
+                return;
+            }
+
+            filterBar.classList.remove('hidden');
+
+            switch (filter) {
+                case 'score90':
+                    filterName.textContent = 'Score 90+';
+                    document.getElementById('filter-min-score').value = '90';
+                    break;
+                case 'score80':
+                    filterName.textContent = 'Score 80-89';
+                    document.getElementById('filter-min-score').value = '80';
+                    break;
+                case 'pnl1m':
+                    filterName.textContent = '$1M+ Profit';
+                    document.getElementById('filter-min-profit').value = '1000000';
+                    break;
+                case 'active7d':
+                    filterName.textContent = 'Active in 7 days';
+                    document.getElementById('filter-activity').value = '7';
+                    break;
+                case 'smallfish':
+                    // Small fish = bottom 25% by PnL in this dataset
+                    filterName.textContent = 'Small Fish (Bottom 25% PnL)';
+                    // Calculate the 25th percentile threshold
+                    const pnls = analyzedAccounts.map(a => parseFloat(a.total_pnl) || 0).sort((a, b) => a - b);
+                    const p25 = pnls[Math.floor(pnls.length / 4)] || 50000;
+                    document.getElementById('filter-min-profit').value = '0';
+                    document.getElementById('filter-max-profit').value = Math.round(p25).toString();
+                    break;
+            }
+
+            applyFilters();
+        }
+
+        function clearQuickFilter() {
+            document.getElementById('active-filter-bar').classList.add('hidden');
+            applyPreset('all');
+        }
+
+        function updateFilteredCount() {
+            document.getElementById('analyzed-showing').textContent = filteredAccounts.length;
+            document.getElementById('analyzed-total').textContent = analyzedAccounts.length;
+
+            if (filteredAccounts.length === 0 && analyzedAccounts.length === 0) {
+                emptyState.classList.remove('hidden');
+            } else {
+                emptyState.classList.add('hidden');
+            }
+        }
+
+        // =====================================================================
+        // Render Table
+        // =====================================================================
+        function renderAnalyzedTable() {
+            const searchTerm = document.getElementById('wallet-search').value.toLowerCase();
+
+            // Filter by search (by wallet or username)
+            let displayAccounts = filteredAccounts;
+            if (searchTerm) {
+                displayAccounts = filteredAccounts.filter(a => {
+                    const username = usernameCache[a.wallet_address.toLowerCase()] || '';
+                    return a.wallet_address.toLowerCase().includes(searchTerm) ||
+                           username.toLowerCase().includes(searchTerm);
+                });
+            }
+
+            // Sort
+            displayAccounts.sort((a, b) => {
+                let aVal, bVal;
+
+                switch (currentSort) {
+                    case 'systematic_score':
+                        aVal = a.systematic_score || 0;
+                        bVal = b.systematic_score || 0;
+                        break;
+                    case 'total_pnl':
+                        aVal = parseFloat(a.total_pnl) || 0;
+                        bVal = parseFloat(b.total_pnl) || 0;
+                        break;
+                    case 'max_drawdown_pct':
+                        // Lower drawdown is better, so we invert for desc sort
+                        aVal = a.max_drawdown_pct || a.estimated_drawdown_pct || 0;
+                        bVal = b.max_drawdown_pct || b.estimated_drawdown_pct || 0;
+                        return sortDirection === 'desc' ? aVal - bVal : bVal - aVal;
+                    case 'win_rate':
+                        aVal = a.win_rate || 0;
+                        bVal = b.win_rate || 0;
+                        break;
+                    case 'num_trades':
+                        aVal = a.num_trades || 0;
+                        bVal = b.num_trades || 0;
+                        break;
+                    case 'trades_last_7d':
+                        aVal = a.trades_last_7d || 0;
+                        bVal = b.trades_last_7d || 0;
+                        break;
+                    case 'trades_last_30d':
+                        aVal = a.trades_last_30d || 0;
+                        bVal = b.trades_last_30d || 0;
+                        break;
+                    case 'activity_recency_days':
+                        // Lower is better for recency
+                        aVal = a.activity_recency_days || 999;
+                        bVal = b.activity_recency_days || 999;
+                        return sortDirection === 'desc' ? aVal - bVal : bVal - aVal;
+                    case 'profit_factor':
+                        aVal = a.profit_factor || 1;
+                        bVal = b.profit_factor || 1;
+                        break;
+                    case 'pl_curve_smoothness':
+                        aVal = a.pl_curve_smoothness || 0;
+                        bVal = b.pl_curve_smoothness || 0;
+                        break;
+                    default:
+                        aVal = 0;
+                        bVal = 0;
+                }
+
+                return sortDirection === 'desc' ? bVal - aVal : aVal - bVal;
+            });
+
+            // Paginate
+            const startIdx = (currentPage - 1) * pageSize;
+            const pageAccounts = displayAccounts.slice(startIdx, startIdx + pageSize);
+
+            // Render
+            const tbody = document.getElementById('analyzed-accounts-table');
+            tbody.innerHTML = pageAccounts.map((account, idx) => renderTraderRow(account, startIdx + idx + 1)).join('');
+
+            // Fetch usernames for accounts on this page (in background)
+            const uncachedAccounts = pageAccounts.filter(a => !usernameCache[a.wallet_address.toLowerCase()]);
+            if (uncachedAccounts.length > 0) {
+                fetchUsernamesForAccounts(uncachedAccounts);
+            }
+
+            // Update pagination
+            const maxPage = Math.ceil(displayAccounts.length / pageSize);
+            document.getElementById('page-info').textContent = `Page ${currentPage} of ${maxPage || 1}`;
+            document.getElementById('prev-page-btn').disabled = currentPage <= 1;
+            document.getElementById('next-page-btn').disabled = currentPage >= maxPage;
+
+            document.getElementById('analyzed-showing').textContent = displayAccounts.length;
+
+            // Add row click handlers
+            document.querySelectorAll('.trader-row').forEach(row => {
+                row.addEventListener('click', (e) => {
+                    if (!e.target.closest('button') && !e.target.closest('a')) {
+                        openAccountModal(row.dataset.wallet);
+                    }
+                });
+            });
+
+            // Add watchlist button handlers
+            document.querySelectorAll('.watchlist-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleWatchlistItem(btn.dataset.wallet);
+                });
+            });
+
+            // Add load more trades button handlers
+            document.querySelectorAll('.load-more-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    loadMoreTrades(btn.dataset.wallet, btn);
+                });
+            });
+
+            // Add dismiss button handlers
+            document.querySelectorAll('.dismiss-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleDismissed(btn.dataset.wallet);
+                });
+            });
+        }
+
+        async function loadMoreTrades(walletAddress, btnElement) {
+            // Change button to loading state
+            const originalText = btnElement.textContent;
+            btnElement.textContent = '...';
+            btnElement.disabled = true;
+
+            try {
+                // Call API to fetch more trades (2000 batch)
+                const response = await fetch(`/api/discovery/fetch-more-trades`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        wallet: walletAddress,
+                        limit: 2000
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch more trades');
+                }
+
+                const data = await response.json();
+
+                // Update the account in our local data
+                const accountIdx = analyzedAccounts.findIndex(a => a.wallet_address === walletAddress);
+                if (accountIdx >= 0) {
+                    // Merge new data
+                    analyzedAccounts[accountIdx] = { ...analyzedAccounts[accountIdx], ...data.account };
+                }
+
+                // Re-render
+                applyFilters();
+
+            } catch (error) {
+                console.error('Failed to load more trades:', error);
+                alert('Failed to load more trades. The API endpoint may not be implemented yet.');
+                btnElement.textContent = originalText;
+                btnElement.disabled = false;
+            }
+        }
+
+        function renderTraderRow(account, rank) {
+            const score = account.systematic_score || 0;
+            const pnl = parseFloat(account.total_pnl) || 0;
+            const maxDrawdown = account.max_drawdown_pct || account.estimated_drawdown_pct || 0;
+            const trades = account.num_trades || 0;
+            const tradesFetched = account.trades_fetched || trades;
+            const trades7d = account.trades_last_7d || 0;
+            const recencyDays = account.activity_recency_days || 999;
+
+            // Score color class
+            let scoreClass = 'score-low';
+            if (score >= 90) scoreClass = 'score-excellent';
+            else if (score >= 80) scoreClass = 'score-good';
+            else if (score >= 65) scoreClass = 'score-moderate';
+
+            // Activity indicator
+            let activityClass = 'activity-dead';
+            let activityTitle = 'Inactive';
+            if (recencyDays <= 1) { activityClass = 'activity-hot'; activityTitle = 'Very active (today)'; }
+            else if (recencyDays <= 7) { activityClass = 'activity-warm'; activityTitle = 'Active (7d)'; }
+            else if (recencyDays <= 30) { activityClass = 'activity-cold'; activityTitle = 'Moderate (30d)'; }
+
+            // PnL formatting
+            const pnlStr = pnl >= 1000000 ? `$${(pnl/1000000).toFixed(1)}M` :
+                           pnl >= 1000 ? `$${(pnl/1000).toFixed(0)}k` : `$${pnl.toFixed(0)}`;
+            const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';
+
+            // Drawdown color
+            let ddColor = 'text-green-400';
+            if (maxDrawdown > 25) ddColor = 'text-red-400';
+            else if (maxDrawdown > 15) ddColor = 'text-orange-400';
+            else if (maxDrawdown > 8) ddColor = 'text-yellow-400';
+
+            // Recency string - more specific for recent activity
+            let recencyStr;
+            if (account.last_trade_timestamp) {
+                const lastTrade = new Date(account.last_trade_timestamp);
+                const now = new Date();
+                const diffMs = now - lastTrade;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+
+                if (diffMins < 60) recencyStr = `${diffMins}m ago`;
+                else if (diffHours < 24) recencyStr = `${diffHours}h ago`;
+                else if (diffHours < 48) recencyStr = '1d ago';
+                else recencyStr = `${Math.floor(diffHours / 24)}d ago`;
+            } else if (recencyDays !== undefined && recencyDays !== null && recencyDays < 999) {
+                recencyStr = recencyDays === 0 ? 'today' :
+                            recencyDays === 1 ? '1d ago' : `${recencyDays}d ago`;
+            } else if (account.is_currently_active || trades7d > 0) {
+                // Infer from activity flags
+                recencyStr = 'recent';
+            } else {
+                recencyStr = '-';
+            }
+
+            // Is in watchlist
+            const inWatchlist = watchlist.includes(account.wallet_address);
+
+            // Check if there might be more trades (hit the fetch limit)
+            // Show + button if: no trades_fetched field, or trades_fetched is a round number suggesting a limit
+            // Also show if metrics are missing (need to fetch fresh data)
+            const needsMoreData = !account.profit_factor || account.profit_factor === null ||
+                                  !account.max_drawdown_pct || account.max_drawdown_pct === null;
+            const hitLimit = tradesFetched >= 100 && (
+                tradesFetched % 100 === 0 || tradesFetched % 250 === 0 || tradesFetched % 500 === 0
+            );
+            const potentiallyMoreTrades = needsMoreData || hitLimit || !account.trades_fetched;
+
+            // Trades display with "load more" indicator
+            const tradesDisplay = potentiallyMoreTrades ?
+                `<span class="text-gray-300">${trades.toLocaleString()}</span><button class="load-more-btn ml-1 text-blue-400 hover:text-blue-300 text-xs font-medium" data-wallet="${account.wallet_address}" title="Fetch full trade history and recalculate metrics">+</button>` :
+                `<span class="text-gray-300">${trades.toLocaleString()}</span>`;
+
+            return `
+                <tr class="trader-row cursor-pointer hover:bg-gray-700/50" data-wallet="${account.wallet_address}">
+                    <td class="py-3 pl-2">
+                        <span class="activity-dot ${activityClass}" title="${activityTitle}"></span>
+                    </td>
+                    <td class="py-3">
+                        <div class="flex items-center">
+                            ${renderWalletDisplay(account.wallet_address, inWatchlist)}
+                        </div>
+                    </td>
+                    <td class="py-3 text-right">
+                        <span class="score-indicator inline-flex items-center justify-center w-10 h-8 rounded ${scoreClass} text-white font-bold text-sm">
+                            ${score.toFixed(0)}
+                        </span>
+                    </td>
+                    <td class="py-3 text-right ${pnlColor} font-medium">${pnlStr}</td>
+                    <td class="py-3 text-right ${ddColor} text-sm">${maxDrawdown.toFixed(1)}%</td>
+                    <td class="py-3 text-right">${tradesDisplay}</td>
+                    <td class="py-3 text-right">
+                        <span class="${trades7d > 0 ? 'text-cyan-400 font-medium' : 'text-gray-500'}">${trades7d}</span>
+                    </td>
+                    <td class="py-3 text-right text-gray-400 text-xs">${recencyStr}</td>
+                    <td class="py-3">
+                        <div class="flex items-center justify-center gap-1">
+                            <button class="watchlist-btn p-1.5 rounded hover:bg-gray-600 transition ${inWatchlist ? 'text-yellow-400' : 'text-gray-500 hover:text-yellow-400'}"
+                                    data-wallet="${account.wallet_address}" title="${inWatchlist ? 'Remove from watchlist' : 'Add to watchlist'}">
+                                <svg class="w-4 h-4" fill="${inWatchlist ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
+                                </svg>
+                            </button>
+                            <button class="dismiss-btn p-1.5 rounded hover:bg-gray-600 transition text-gray-500 hover:text-red-400"
+                                    data-wallet="${account.wallet_address}" title="Dismiss (mark as reviewed)">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
+                                </svg>
+                            </button>
+                            <a href="https://polymarket.com/profile/${account.wallet_address}" target="_blank"
+                               class="p-1.5 rounded hover:bg-gray-600 text-gray-500 hover:text-purple-400 transition" title="View on Polymarket">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                </svg>
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        // =====================================================================
+        // Modal Functions
+        // =====================================================================
+        function openAccountModal(walletAddress) {
+            const account = analyzedAccounts.find(a => a.wallet_address === walletAddress);
+            if (!account) return;
+
+            currentModalAccount = account;
+
+            // Username display (use cached if available, otherwise fetch)
+            const username = usernameCache[walletAddress.toLowerCase()];
+            document.getElementById('modal-username').textContent = username || `Trader ${walletAddress.substring(0, 8)}`;
+            document.getElementById('modal-wallet').textContent = walletAddress;
+
+            // Trader type badge
+            const traderType = getTraderTypeFromCategories(account);
+            const traderTypeEl = document.getElementById('modal-trader-type');
+            traderTypeEl.textContent = traderType.type;
+            traderTypeEl.className = `px-2 py-0.5 rounded text-xs font-medium ${traderType.color}`;
+
+            // Fetch username if not cached
+            if (!username) {
+                fetchUsernameForModal(walletAddress);
+            }
+
+            const score = account.systematic_score || 0;
+            const scoreColor = score >= 90 ? 'bg-green-500/20 text-green-400' :
+                              score >= 80 ? 'bg-blue-500/20 text-blue-400' :
+                              score >= 65 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400';
+            document.getElementById('modal-score-badge').innerHTML = `<span class="px-3 py-1 rounded-full text-sm font-medium ${scoreColor}">Score: ${score.toFixed(0)}</span>`;
+
+            // Stats
+            document.getElementById('modal-total-trades').textContent = account.num_trades || '-';
+            const pnl = parseFloat(account.total_pnl) || 0;
+            document.getElementById('modal-total-pnl').textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toLocaleString();
+            document.getElementById('modal-total-pnl').className = 'text-xl font-bold ' + (pnl >= 0 ? 'text-green-400' : 'text-red-400');
+            const winRate = account.win_rate;
+            document.getElementById('modal-win-rate').textContent = winRate != null ? ((winRate) * 100).toFixed(1) + '%' : 'N/A';
+            const profitFactor = account.profit_factor;
+            document.getElementById('modal-profit-factor').textContent = profitFactor != null ? profitFactor.toFixed(2) : 'N/A';
+
+            // Drawdown metrics - check for null/undefined properly
+            const maxDD = account.max_drawdown_pct ?? account.estimated_drawdown_pct ?? null;
+            const avgDD = account.avg_drawdown_pct ?? null;
+            const severeDD = account.severe_drawdown_count ?? null;
+            const smoothness = account.pl_curve_smoothness ?? null;
+            const hasDrawdownData = maxDD !== null;
+
+            // Color code drawdowns
+            let ddColor = 'text-gray-400';
+            if (hasDrawdownData) {
+                ddColor = 'text-green-400';
+                if (maxDD > 25) ddColor = 'text-red-400';
+                else if (maxDD > 15) ddColor = 'text-orange-400';
+                else if (maxDD > 8) ddColor = 'text-yellow-400';
+            }
+
+            document.getElementById('modal-max-dd').textContent = hasDrawdownData ? maxDD.toFixed(1) + '%' : 'N/A';
+            document.getElementById('modal-max-dd').className = 'text-lg font-bold ' + ddColor;
+
+            document.getElementById('modal-avg-dd').textContent = avgDD !== null ? avgDD.toFixed(1) + '%' : 'N/A';
+            document.getElementById('modal-severe-dd').textContent = severeDD !== null ? severeDD : 'N/A';
+            document.getElementById('modal-severe-dd').className = 'text-lg font-bold ' + (severeDD === null ? 'text-gray-400' : severeDD === 0 ? 'text-green-400' : severeDD >= 3 ? 'text-red-400' : 'text-yellow-400');
+
+            let smoothnessColor = 'text-gray-400';
+            if (smoothness !== null) {
+                if (smoothness >= 0.7) smoothnessColor = 'text-green-400';
+                else if (smoothness >= 0.5) smoothnessColor = 'text-yellow-400';
+                else if (smoothness < 0.3) smoothnessColor = 'text-red-400';
+            }
+            document.getElementById('modal-smoothness').textContent = smoothness !== null ? (smoothness * 100).toFixed(0) + '%' : 'N/A';
+            document.getElementById('modal-smoothness').className = 'text-lg font-bold ' + smoothnessColor;
+
+            // Show "Refresh Data" indicator if enhanced metrics are missing
+            // Check for the NEW enhanced metrics, not just the old estimated_drawdown_pct
+            const hasEnhancedMetrics = account.profit_factor != null &&
+                                       account.win_rate != null &&
+                                       account.avg_drawdown_pct != null &&
+                                       account.pl_curve_smoothness != null;
+            const needsRefresh = !hasEnhancedMetrics;
+            document.getElementById('modal-refresh-hint').classList.toggle('hidden', !needsRefresh);
+
+            // Activity
+            document.getElementById('modal-7d-trades').textContent = account.trades_last_7d || 0;
+            document.getElementById('modal-30d-trades').textContent = account.trades_last_30d || 0;
+
+            // Last trade - show more specific timestamp if available
+            let lastTradeStr;
+            if (account.last_trade_timestamp) {
+                const lastTrade = new Date(account.last_trade_timestamp);
+                const now = new Date();
+                const diffMs = now - lastTrade;
+                const diffSecs = Math.floor(diffMs / 1000);
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+
+                if (diffSecs < 60) lastTradeStr = `${diffSecs}s ago`;
+                else if (diffMins < 60) lastTradeStr = `${diffMins}m ago`;
+                else if (diffHours < 24) lastTradeStr = `${diffHours}h ago`;
+                else if (diffDays === 1) lastTradeStr = '1 day ago';
+                else lastTradeStr = `${diffDays} days ago`;
+            } else {
+                const recency = account.activity_recency_days;
+                if (recency !== undefined && recency !== null && recency < 999) {
+                    lastTradeStr = recency === 0 ? 'Today' : recency === 1 ? '1 day ago' : `${recency} days ago`;
+                } else if (account.is_currently_active || (account.trades_last_7d || 0) > 0) {
+                    lastTradeStr = 'Recent';
+                } else {
+                    lastTradeStr = 'N/A';
+                }
+            }
+            document.getElementById('modal-last-trade').textContent = lastTradeStr;
+
+            // Score breakdown - enhanced with all components
+            renderScoreBreakdown(account);
+
+            // Category breakdown
+            renderCategoryBreakdown(account);
+
+            // Polymarket link
+            document.getElementById('modal-polymarket-link').href = `https://polymarket.com/profile/${walletAddress}`;
+
+            // Watchlist button state
+            updateModalWatchlistButton(walletAddress);
+            document.getElementById('modal-watchlist').onclick = () => toggleWatchlistItem(walletAddress);
+
+            // Dismiss button state
+            updateModalDismissButton(walletAddress);
+
+            // Clear positions container (prevent data leaking from previous modal view)
+            document.getElementById('modal-positions-container').innerHTML =
+                '<div class="text-sm text-gray-500 text-center py-4">Click "Refresh" to load current positions</div>';
+
+            document.getElementById('detail-modal').classList.remove('hidden');
+
+            // Initialize P/L chart after modal is visible
+            setTimeout(() => initPlChart(account), 100);
+
+            // Setup positions refresh button
+            document.getElementById('modal-refresh-positions').onclick = () => loadPositionsForModal(walletAddress);
+        }
+
+        async function fetchUsernameForModal(walletAddress) {
+            try {
+                const response = await fetch(`/api/discovery/profile/${walletAddress}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.username) {
+                        usernameCache[walletAddress.toLowerCase()] = data.username;
+                        // Update the modal header if still showing this wallet
+                        if (currentModalAccount?.wallet_address === walletAddress) {
+                            document.getElementById('modal-username').textContent = data.username;
+                        }
+                        // Also re-render table to show the username
+                        renderAnalyzedTable();
+                    }
+                }
+            } catch (error) {
+                console.log('Username fetch failed:', error);
+            }
+        }
+
+        function renderScoreBreakdown(account) {
+            const container = document.getElementById('modal-score-breakdown');
+
+            // If we have explicit score_breakdown, use it
+            let breakdown = account.score_breakdown || {};
+
+            // If empty, calculate score components from available metrics
+            if (Object.keys(breakdown).length === 0) {
+                breakdown = calculateScoreBreakdown(account);
+            }
+
+            if (Object.keys(breakdown).length === 0) {
+                container.innerHTML = '<div class="text-sm text-gray-500">Score breakdown not available. Click "Fetch Full Data" to analyze.</div>';
+                return;
+            }
+
+            // Define score components with descriptions and icons
+            const componentMeta = {
+                'activity': { label: 'Activity', desc: 'Trading frequency & recency', icon: '⚡' },
+                'risk_control': { label: 'Risk Control', desc: 'Low drawdowns', icon: '🛡️' },
+                'win_rate': { label: 'Win Rate', desc: 'Trade success rate', icon: '✓' },
+                'profit_factor': { label: 'Profit Factor', desc: 'Profit/loss ratio', icon: '💰' },
+                'diversification': { label: 'Diversification', desc: 'Market variety', icon: '🌐' },
+                'smoothness': { label: 'P/L Smoothness', desc: 'Steady equity curve', icon: '📈' },
+                'experience': { label: 'Experience', desc: 'Trade count & history', icon: '📊' },
+                'consistency': { label: 'Consistency', desc: 'Position sizing', icon: '🎯' },
+            };
+
+            // Build display items
+            let displayItems = Object.entries(breakdown).map(([key, value]) => {
+                const meta = componentMeta[key] || { label: formatScoreKey(key), desc: '', icon: '•' };
+                return {
+                    key,
+                    label: meta.label,
+                    desc: meta.desc,
+                    icon: meta.icon,
+                    value: value,
+                };
+            });
+
+            // Sort by absolute value (most impactful first)
+            displayItems.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+            displayItems = displayItems.slice(0, 8);
+
+            container.innerHTML = displayItems.map(item => {
+                const val = item.value;
+                const barWidth = Math.min(100, Math.abs(val) * 5);  // Scale for visibility
+                const barColor = val >= 0 ? 'bg-green-500' : 'bg-red-500';
+                const textColor = val >= 0 ? 'text-green-400' : 'text-red-400';
+
+                return `
+                    <div class="flex items-center justify-between text-sm py-1">
+                        <div class="flex items-center gap-2 flex-1">
+                            <span class="text-gray-500 w-5">${item.icon}</span>
+                            <span class="text-gray-300">${item.label}</span>
+                            ${item.desc ? `<span class="text-xs text-gray-500 hidden sm:inline">- ${item.desc}</span>` : ''}
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-20 h-2 bg-gray-700 rounded-full mr-2 overflow-hidden">
+                                <div class="h-full ${barColor} score-bar" style="width: ${barWidth}%"></div>
+                            </div>
+                            <span class="${textColor} w-10 text-right font-medium">${val >= 0 ? '+' : ''}${val.toFixed(0)}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function calculateScoreBreakdown(account) {
+            // Generate score breakdown from available metrics
+            const breakdown = {};
+            const totalScore = account.systematic_score || 0;
+
+            // Activity: based on recency and 7d trades
+            const recency = account.activity_recency_days || 999;
+            const trades7d = account.trades_last_7d || 0;
+            if (recency <= 1) breakdown.activity = 20;
+            else if (recency <= 7) breakdown.activity = 15;
+            else if (recency <= 14) breakdown.activity = 10;
+            else if (recency <= 30) breakdown.activity = 5;
+            else breakdown.activity = 0;
+            if (trades7d > 50) breakdown.activity += 5;
+
+            // Risk Control: based on max drawdown
+            const maxDD = account.max_drawdown_pct || account.estimated_drawdown_pct || 0;
+            if (maxDD <= 5) breakdown.risk_control = 20;
+            else if (maxDD <= 10) breakdown.risk_control = 15;
+            else if (maxDD <= 15) breakdown.risk_control = 10;
+            else if (maxDD <= 25) breakdown.risk_control = 5;
+            else breakdown.risk_control = 0;
+
+            // Win Rate
+            const winRate = (account.win_rate || 0.5) * 100;
+            if (winRate >= 60) breakdown.win_rate = 15;
+            else if (winRate >= 55) breakdown.win_rate = 10;
+            else if (winRate >= 50) breakdown.win_rate = 5;
+            else breakdown.win_rate = 0;
+
+            // Profit Factor
+            const pf = account.profit_factor || 1;
+            if (pf >= 2.0) breakdown.profit_factor = 15;
+            else if (pf >= 1.5) breakdown.profit_factor = 10;
+            else if (pf >= 1.2) breakdown.profit_factor = 5;
+            else breakdown.profit_factor = 0;
+
+            // P/L Smoothness
+            const smoothness = account.pl_curve_smoothness || 0.5;
+            breakdown.smoothness = Math.round(smoothness * 15);
+
+            // Diversification (unique markets)
+            const markets = account.unique_markets || 0;
+            if (markets >= 50) breakdown.diversification = 10;
+            else if (markets >= 25) breakdown.diversification = 7;
+            else if (markets >= 10) breakdown.diversification = 4;
+            else breakdown.diversification = 0;
+
+            // Experience (trade count)
+            const trades = account.num_trades || 0;
+            if (trades >= 500) breakdown.experience = 10;
+            else if (trades >= 200) breakdown.experience = 7;
+            else if (trades >= 50) breakdown.experience = 4;
+            else breakdown.experience = 0;
+
+            return breakdown;
+        }
+
+        function renderCategoryBreakdown(account) {
+            const categories = account.category_breakdown || account.categories || {};
+            const container = document.getElementById('modal-categories');
+
+            const categoryColors = {
+                'POLITICS': 'bg-red-500/20 text-red-400 border-red-500/30',
+                'CRYPTO': 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+                'SPORTS': 'bg-green-500/20 text-green-400 border-green-500/30',
+                'ECONOMICS': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+                'TECH': 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+                'WEATHER': 'bg-teal-500/20 text-teal-400 border-teal-500/30',
+                'CULTURE': 'bg-pink-500/20 text-pink-400 border-pink-500/30',
+                'FINANCE': 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+            };
+
+            // If no category data, show trader profile based on metrics
+            if (Object.keys(categories).length === 0) {
+                const profile = getTraderProfile(account);
+                container.innerHTML = profile.map(badge => `
+                    <div class="px-3 py-1.5 rounded-lg border ${badge.color} text-sm">
+                        <span class="font-medium">${badge.label}</span>
+                    </div>
+                `).join('');
+                return;
+            }
+
+            const sortedCategories = Object.entries(categories)
+                .filter(([_, pct]) => pct > 0.05) // Only show categories > 5%
+                .sort((a, b) => b[1] - a[1]);
+
+            container.innerHTML = sortedCategories.map(([cat, pct]) => {
+                const colorClass = categoryColors[cat.toUpperCase()] || 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+                const percentage = (pct * 100).toFixed(0);
+
+                return `
+                    <div class="px-3 py-1.5 rounded-lg border ${colorClass} text-sm">
+                        <span class="font-medium">${cat}</span>
+                        <span class="ml-1 opacity-75">${percentage}%</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function getTraderProfile(account) {
+            // Generate trader profile badges from available metrics
+            const badges = [];
+
+            // Volume tier
+            const pnl = parseFloat(account.total_pnl) || 0;
+            if (pnl >= 1000000) badges.push({ label: 'Whale ($1M+)', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' });
+            else if (pnl >= 100000) badges.push({ label: 'Big Player', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' });
+            else if (pnl >= 50000) badges.push({ label: 'Established', color: 'bg-green-500/20 text-green-400 border-green-500/30' });
+            else badges.push({ label: 'Growing', color: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' });
+
+            // Activity level
+            const trades7d = account.trades_last_7d || 0;
+            if (trades7d >= 100) badges.push({ label: 'High Volume', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' });
+            else if (trades7d >= 20) badges.push({ label: 'Active', color: 'bg-green-500/20 text-green-400 border-green-500/30' });
+
+            // Market diversity
+            const markets = account.unique_markets || 0;
+            if (markets >= 50) badges.push({ label: 'Diversified', color: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' });
+            else if (markets >= 10) badges.push({ label: 'Multi-Market', color: 'bg-teal-500/20 text-teal-400 border-teal-500/30' });
+
+            // Risk profile
+            const maxDD = account.max_drawdown_pct || account.estimated_drawdown_pct || 0;
+            if (maxDD <= 5) badges.push({ label: 'Low Risk', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' });
+            else if (maxDD >= 20) badges.push({ label: 'High Risk', color: 'bg-red-500/20 text-red-400 border-red-500/30' });
+
+            return badges.slice(0, 4); // Max 4 badges
+        }
+
+        async function loadPositionsForModal(walletAddress) {
+            const container = document.getElementById('modal-positions-container');
+            container.innerHTML = '<div class="text-sm text-gray-400 text-center py-4">Loading positions...</div>';
+
+            try {
+                const response = await fetch(`/api/discovery/positions/${walletAddress}?limit=10`);
+                if (!response.ok) throw new Error('Failed to fetch positions');
+
+                const data = await response.json();
+                const positions = data.positions || [];
+
+                if (positions.length === 0) {
+                    container.innerHTML = '<div class="text-sm text-gray-500 text-center py-4">No open positions</div>';
+                    return;
+                }
+
+                container.innerHTML = positions.map(pos => {
+                    const pnlColor = pos.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400';
+                    const pnlSign = pos.unrealized_pnl >= 0 ? '+' : '';
+                    const title = pos.market_title || pos.market_slug || 'Unknown Market';
+                    const shortTitle = title.length > 60 ? title.substring(0, 57) + '...' : title;
+
+                    return `
+                        <div class="bg-gray-700 rounded-lg p-3">
+                            <div class="flex items-start justify-between">
+                                <div class="flex-1 min-w-0">
+                                    <div class="text-sm text-white font-medium truncate" title="${escapeHtml(title)}">${escapeHtml(shortTitle)}</div>
+                                    <div class="flex items-center gap-3 mt-1 text-xs text-gray-400">
+                                        <span class="px-1.5 py-0.5 rounded bg-gray-600">${pos.outcome}</span>
+                                        <span>${pos.size.toFixed(0)} shares @ $${pos.avg_price.toFixed(2)}</span>
+                                    </div>
+                                </div>
+                                <div class="text-right ml-3">
+                                    <div class="text-sm font-medium text-white">$${pos.current_value.toFixed(0)}</div>
+                                    <div class="text-xs ${pnlColor}">${pnlSign}$${pos.unrealized_pnl.toFixed(0)}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                // Add summary
+                const totalValue = positions.reduce((sum, p) => sum + p.current_value, 0);
+                const totalPnl = positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
+                const pnlColor = totalPnl >= 0 ? 'text-green-400' : 'text-red-400';
+
+                container.innerHTML += `
+                    <div class="flex items-center justify-between pt-2 mt-2 border-t border-gray-600 text-sm">
+                        <span class="text-gray-400">${positions.length} position${positions.length !== 1 ? 's' : ''}</span>
+                        <div>
+                            <span class="text-white font-medium">$${totalValue.toFixed(0)}</span>
+                            <span class="${pnlColor} ml-2">(${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(0)})</span>
+                        </div>
+                    </div>
+                `;
+
+            } catch (error) {
+                console.error('Failed to load positions:', error);
+                container.innerHTML = '<div class="text-sm text-red-400 text-center py-4">Failed to load positions</div>';
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('detail-modal').classList.add('hidden');
+            currentModalAccount = null;
+            // Destroy chart when closing modal
+            if (plChart) {
+                plChart.destroy();
+                plChart = null;
+            }
+        }
+
+        function formatScoreKey(key) {
+            return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        function renderWalletDisplay(walletAddress, inWatchlist = false) {
+            const username = usernameCache[walletAddress.toLowerCase()];
+            const shortWallet = `${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}`;
+            const starIcon = inWatchlist ? '<svg class="w-4 h-4 ml-2 text-yellow-400 fill-current" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>' : '';
+
+            if (username) {
+                return `
+                    <div class="flex flex-col">
+                        <span class="wallet-link text-sm text-white font-medium">${escapeHtml(username)}</span>
+                        <span class="text-xs text-gray-500 font-mono">${shortWallet}</span>
+                    </div>
+                    ${starIcon}
+                `;
+            } else {
+                return `
+                    <span class="wallet-link font-mono text-sm text-gray-300">${shortWallet}</span>
+                    ${starIcon}
+                `;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function getTraderTypeFromCategories(account) {
+            // Determine trader type from their trading activity
+            const categories = account.category_breakdown || account.categories || {};
+
+            if (Object.keys(categories).length === 0) {
+                // Try to infer from other data
+                if (account.unique_markets > 50) return { type: 'Diversified', color: 'bg-purple-500/20 text-purple-400' };
+                if (account.num_trades > 500) return { type: 'High Volume', color: 'bg-blue-500/20 text-blue-400' };
+                return { type: 'Unknown', color: 'bg-gray-500/20 text-gray-400' };
+            }
+
+            // Find dominant category
+            const sortedCats = Object.entries(categories).sort((a, b) => b[1] - a[1]);
+            const topCategory = sortedCats[0];
+            const secondCategory = sortedCats[1];
+
+            const categoryStyles = {
+                'POLITICS': { type: 'Political', color: 'bg-red-500/20 text-red-400' },
+                'CRYPTO': { type: 'Crypto', color: 'bg-orange-500/20 text-orange-400' },
+                'SPORTS': { type: 'Sports', color: 'bg-green-500/20 text-green-400' },
+                'ECONOMICS': { type: 'Economics', color: 'bg-blue-500/20 text-blue-400' },
+                'TECH': { type: 'Tech', color: 'bg-cyan-500/20 text-cyan-400' },
+                'WEATHER': { type: 'Weather', color: 'bg-teal-500/20 text-teal-400' },
+                'CULTURE': { type: 'Culture', color: 'bg-pink-500/20 text-pink-400' },
+                'FINANCE': { type: 'Finance', color: 'bg-yellow-500/20 text-yellow-400' },
+                'OVERALL': { type: 'Generalist', color: 'bg-purple-500/20 text-purple-400' },
+            };
+
+            // Check if diversified (no single category > 50%)
+            if (topCategory && topCategory[1] < 0.5 && sortedCats.length >= 3) {
+                return { type: 'Diversified', color: 'bg-purple-500/20 text-purple-400' };
+            }
+
+            const style = categoryStyles[topCategory?.[0]?.toUpperCase()] || { type: 'Mixed', color: 'bg-gray-500/20 text-gray-400' };
+
+            // If highly specialized (>70% in one category)
+            if (topCategory && topCategory[1] > 0.7) {
+                return { type: style.type + ' Specialist', color: style.color };
+            }
+
+            return style;
+        }
+
+        // =====================================================================
+        // Fetch Full Data and P/L Chart
+        // =====================================================================
+        async function fetchFullDataForModal() {
+            if (!currentModalAccount) return;
+
+            const btn = document.getElementById('modal-fetch-data-btn');
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Fetching...';
+
+            try {
+                const response = await fetch('/api/discovery/fetch-more-trades', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        wallet: currentModalAccount.wallet_address,
+                        limit: 2000
+                    })
+                });
+
+                if (!response.ok) throw new Error('Failed to fetch data');
+
+                const result = await response.json();
+                const updatedAccount = result.account;
+
+                // Update the account in our local list
+                const idx = analyzedAccounts.findIndex(a => a.wallet_address === currentModalAccount.wallet_address);
+                if (idx >= 0) {
+                    analyzedAccounts[idx] = {...analyzedAccounts[idx], ...updatedAccount};
+                }
+
+                // Re-open modal with updated data
+                openAccountModal(currentModalAccount.wallet_address);
+                renderAnalyzedTable();
+
+                // Show success message
+                btn.textContent = 'Updated!';
+                setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 2000);
+
+            } catch (error) {
+                console.error('Failed to fetch full data:', error);
+                btn.textContent = 'Error - Retry';
+                btn.disabled = false;
+            }
+        }
+
+        function initPlChart(account) {
+            const canvas = document.getElementById('pl-chart');
+            const ctx = canvas.getContext('2d');
+
+            // Destroy existing chart
+            if (plChart) {
+                plChart.destroy();
+            }
+
+            // Check if we have actual P/L curve data from deep analysis
+            const hasRealCurveData = account.pl_curve_data && account.pl_curve_data.length > 10;
+
+            // Generate P/L curve based on account metrics
+            // NOTE: This is an ESTIMATED curve shape, not actual trade-by-trade P/L
+            const totalPnl = parseFloat(account.total_pnl) || 0;
+            const numTrades = account.num_trades || 100;
+            const smoothness = account.pl_curve_smoothness || 0.5;
+            const maxDrawdownPct = (account.max_drawdown_pct || account.estimated_drawdown_pct || 15) / 100;
+
+            // Use fewer points for smoother curve that better shows the trajectory
+            const points = Math.min(numTrades, 50);
+            const data = [];
+            const isNegativeAccount = totalPnl < 0;
+
+            // Use seeded random for consistency across page refreshes
+            let seed = account.wallet_address ? parseInt(account.wallet_address.substring(2, 10), 16) : 12345;
+            const seededRandom = () => {
+                seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+                return seed / 0x7fffffff;
+            };
+
+            // Simplified curve generation that clearly shows the trajectory to final P/L
+            // Uses a sigmoid-like growth with some noise based on smoothness
+            for (let i = 0; i <= points; i++) {
+                const progress = i / points;
+
+                // Use a slightly curved progression (accelerating gains/losses)
+                // This creates a more natural-looking P/L curve
+                let baseProgress;
+                if (isNegativeAccount) {
+                    // For losses: accelerating decline
+                    baseProgress = Math.pow(progress, 0.8);
+                } else {
+                    // For profits: slight acceleration
+                    baseProgress = Math.pow(progress, 1.1);
+                }
+
+                // Target P/L at this point
+                let targetPnl = totalPnl * baseProgress;
+
+                // Add controlled noise based on smoothness (less noise = smoother curve)
+                const maxNoise = Math.abs(totalPnl) * 0.08 * (1 - smoothness);
+                const noise = (seededRandom() - 0.5) * maxNoise;
+
+                // Apply drawdown effect at certain points (based on account's drawdown history)
+                let drawdownEffect = 0;
+                if (maxDrawdownPct > 0 && !isNegativeAccount && i > 5 && i < points - 5) {
+                    // Create 1-3 drawdown periods spread across the curve
+                    const ddCount = Math.min(3, Math.max(1, account.drawdown_count || 1));
+                    for (let d = 0; d < ddCount; d++) {
+                        const ddPosition = (d + 0.5) / ddCount;
+                        const distFromDD = Math.abs(progress - ddPosition);
+                        if (distFromDD < 0.1) {
+                            // Within drawdown zone
+                            const ddIntensity = 1 - (distFromDD / 0.1);
+                            const ddMagnitude = maxDrawdownPct * 0.5; // Show partial drawdown effect
+                            drawdownEffect = Math.max(drawdownEffect, targetPnl * ddMagnitude * ddIntensity);
+                        }
+                    }
+                }
+
+                let cumPnl = targetPnl + noise - drawdownEffect;
+
+                // Ensure we don't overshoot the final P/L
+                if (!isNegativeAccount) {
+                    cumPnl = Math.min(cumPnl, totalPnl * 1.05);
+                } else {
+                    cumPnl = Math.max(cumPnl, totalPnl * 1.05);
+                }
+
+                data.push({ x: i, y: cumPnl });
+            }
+
+            // Force last point to exact total P/L
+            data[data.length - 1].y = totalPnl;
+
+            // Smooth out any jarring jumps near the end
+            if (data.length > 3) {
+                const lastIdx = data.length - 1;
+                const secondLast = data[lastIdx - 1].y;
+                const target = totalPnl;
+                // If there's a big jump at the end, smooth it
+                if (Math.abs(target - secondLast) > Math.abs(totalPnl) * 0.15) {
+                    data[lastIdx - 1].y = secondLast + (target - secondLast) * 0.6;
+                }
+            }
+
+            // Find min value for chart scaling
+            const minY = Math.min(...data.map(d => d.y));
+            const maxY = Math.max(...data.map(d => d.y));
+
+            plChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Cumulative P/L',
+                        data: data,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        fill: true,
+                        tension: 0.2,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                        segment: {
+                            borderColor: ctx => {
+                                // Color segments based on direction
+                                const curr = ctx.p1.parsed.y;
+                                const prev = ctx.p0.parsed.y;
+                                return curr < prev ? '#ef4444' : '#10b981';
+                            }
+                        }
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    const val = context.parsed.y;
+                                    return `P/L: ${val >= 0 ? '+' : ''}$${val.toLocaleString(undefined, {maximumFractionDigits: 0})}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            display: true,
+                            title: { display: true, text: 'Trades', color: '#9ca3af' },
+                            grid: { color: 'rgba(75, 85, 99, 0.3)' },
+                            ticks: { color: '#9ca3af' }
+                        },
+                        y: {
+                            display: true,
+                            title: { display: true, text: 'P/L ($)', color: '#9ca3af' },
+                            grid: { color: 'rgba(75, 85, 99, 0.3)' },
+                            min: minY < 0 ? minY * 1.1 : 0,
+                            max: maxY > 0 ? maxY * 1.1 : undefined,  // Ensure chart shows full P/L range
+                            ticks: {
+                                color: '#9ca3af',
+                                callback: (value) => value >= 1000000 ? `$${(value/1000000).toFixed(1)}M` :
+                                                     value >= 1000 ? `$${Math.round(value/1000)}k` :
+                                                     value <= -1000 ? `-$${Math.abs(Math.round(value/1000))}k` : `$${Math.round(value)}`
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // =====================================================================
+        // Watchlist Functions
+        // =====================================================================
+        async function toggleWatchlistItem(walletAddress) {
+            const idx = watchlist.indexOf(walletAddress);
+            if (idx >= 0) {
+                watchlist.splice(idx, 1);
+                // Sync with server
+                try {
+                    await fetch(`/api/discovery/watchlist/${walletAddress}`, { method: 'DELETE' });
+                } catch (e) { console.log('Failed to sync watchlist removal'); }
+            } else {
+                watchlist.push(walletAddress);
+                // Remove from dismissed if adding to watchlist
+                const dismissedIdx = dismissed.indexOf(walletAddress);
+                if (dismissedIdx >= 0) {
+                    dismissed.splice(dismissedIdx, 1);
+                    localStorage.setItem('discovery_dismissed', JSON.stringify(dismissed));
+                }
+                // Sync with server
+                try {
+                    await fetch(`/api/discovery/watchlist/${walletAddress}`, { method: 'POST' });
+                } catch (e) { console.log('Failed to sync watchlist add'); }
+            }
+            localStorage.setItem('discovery_watchlist', JSON.stringify(watchlist));
+            document.getElementById('watchlist-count').textContent = watchlist.length;
+            renderAnalyzedTable();
+            renderWatchlistPanel();
+            // Update modal if open
+            if (currentModalAccount?.wallet_address === walletAddress) {
+                updateModalWatchlistButton(walletAddress);
+            }
+        }
+
+        function toggleWatchlist() {
+            const panel = document.getElementById('watchlist-panel');
+            panel.classList.toggle('hidden');
+            if (!panel.classList.contains('hidden')) {
+                renderWatchlistPanel();
+            }
+        }
+
+        function renderWatchlistPanel() {
+            const content = document.getElementById('watchlist-content');
+            if (watchlist.length === 0) {
+                content.innerHTML = '<p class="text-gray-400 text-sm">No accounts in watchlist yet. Click the star icon on any trader to add.</p>';
+                return;
+            }
+
+            const watchlistAccounts = analyzedAccounts.filter(a => watchlist.includes(a.wallet_address));
+            content.innerHTML = watchlistAccounts.map(account => {
+                const score = account.systematic_score || 0;
+                const pnl = parseFloat(account.total_pnl) || 0;
+                return `
+                    <div class="flex items-center justify-between p-2 bg-gray-700 rounded cursor-pointer hover:bg-gray-600" onclick="openAccountModal('${account.wallet_address}')">
+                        <div>
+                            <span class="font-mono text-sm text-white">${account.wallet_address.substring(0, 10)}...${account.wallet_address.substring(38)}</span>
+                            <span class="ml-2 text-xs ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}">${pnl >= 0 ? '+' : ''}$${pnl.toLocaleString()}</span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium ${score >= 80 ? 'text-green-400' : score >= 65 ? 'text-yellow-400' : 'text-gray-400'}">${score.toFixed(0)}</span>
+                            <button onclick="event.stopPropagation(); toggleWatchlistItem('${account.wallet_address}')" class="ml-2 text-yellow-400 hover:text-yellow-300">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // =====================================================================
+        // Dismissed Functions
+        // =====================================================================
+        async function toggleDismissed(walletAddress) {
+            const idx = dismissed.indexOf(walletAddress);
+            if (idx >= 0) {
+                // Undismiss
+                dismissed.splice(idx, 1);
+                try {
+                    await fetch(`/api/discovery/dismissed/${walletAddress}`, { method: 'DELETE' });
+                } catch (e) { console.log('Failed to sync undismiss'); }
+            } else {
+                // Dismiss
+                dismissed.push(walletAddress);
+                // Remove from watchlist if dismissing
+                const watchlistIdx = watchlist.indexOf(walletAddress);
+                if (watchlistIdx >= 0) {
+                    watchlist.splice(watchlistIdx, 1);
+                    localStorage.setItem('discovery_watchlist', JSON.stringify(watchlist));
+                    document.getElementById('watchlist-count').textContent = watchlist.length;
+                }
+                try {
+                    await fetch(`/api/discovery/dismissed/${walletAddress}`, { method: 'POST' });
+                } catch (e) { console.log('Failed to sync dismiss'); }
+            }
+            localStorage.setItem('discovery_dismissed', JSON.stringify(dismissed));
+            updateDismissedCount();
+
+            // If hiding dismissed, remove from view and close modal
+            if (hideDismissed && idx < 0) {
+                // Was just dismissed, close modal and reload
+                closeModal();
+                await loadAnalyzedAccounts();
+            } else {
+                // Just update UI
+                renderAnalyzedTable();
+                if (currentModalAccount?.wallet_address === walletAddress) {
+                    updateModalDismissButton(walletAddress);
+                }
+            }
+        }
+
+        function updateModalWatchlistButton(walletAddress) {
+            const inWatchlist = watchlist.includes(walletAddress);
+            const watchlistBtn = document.getElementById('modal-watchlist');
+            watchlistBtn.innerHTML = inWatchlist ?
+                '<svg class="w-5 h-5 mr-1 fill-current" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Remove from Watchlist' :
+                '<svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path></svg>Add to Watchlist';
+            watchlistBtn.className = `flex items-center transition ${inWatchlist ? 'text-yellow-400' : 'text-gray-400 hover:text-yellow-400'}`;
+        }
+
+        function updateModalDismissButton(walletAddress) {
+            const isDismissed = dismissed.includes(walletAddress);
+            const dismissBtn = document.getElementById('modal-dismiss');
+            const dismissText = document.getElementById('modal-dismiss-text');
+            dismissText.textContent = isDismissed ? 'Undo Dismiss' : 'Dismiss';
+            dismissBtn.className = `flex items-center transition ${isDismissed ? 'text-red-400' : 'text-gray-400 hover:text-red-400'}`;
+        }
+
+        function updateDismissedCount() {
+            const dismissedCountEl = document.getElementById('dismissed-count');
+            if (dismissedCountEl) dismissedCountEl.textContent = dismissed.length;
+        }
+
+        async function toggleHideDismissed() {
+            hideDismissed = !hideDismissed;
+            localStorage.setItem('discovery_hide_dismissed', JSON.stringify(hideDismissed));
+            updateHideDismissedToggle();
+            await loadAnalyzedAccounts();
+        }
+
+        function updateHideDismissedToggle() {
+            const toggleBtn = document.getElementById('toggle-hide-dismissed');
+            if (toggleBtn) {
+                toggleBtn.textContent = hideDismissed ? 'Show Dismissed' : 'Hide Dismissed';
+                toggleBtn.className = `text-xs px-2 py-1 rounded ${hideDismissed ? 'bg-gray-600 text-gray-300' : 'bg-red-600/20 text-red-400'}`;
+            }
+        }
+
+        // =====================================================================
+        // Export Function
+        // =====================================================================
+        function exportToCSV() {
+            const headers = ['Wallet', 'Score', 'Total PnL', 'Win Rate', 'Trades', '7d Trades', 'Last Trade Days'];
+            const rows = filteredAccounts.map(a => [
+                a.wallet_address,
+                (a.systematic_score || 0).toFixed(0),
+                (parseFloat(a.total_pnl) || 0).toFixed(2),
+                ((a.win_rate || 0) * 100).toFixed(1) + '%',
+                a.num_trades || 0,
+                a.trades_last_7d || 0,
+                a.activity_recency_days || 999
+            ]);
+
+            const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `polymarket_traders_${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // =====================================================================
+        // Initialize
+        // =====================================================================
+        document.addEventListener('DOMContentLoaded', async () => {
+            document.getElementById('watchlist-count').textContent = watchlist.length;
+            updateDismissedCount();
+            updateHideDismissedToggle();
+
+            // Try to load existing analyzed accounts
+            // This will show the smart funnel if accounts exist
+            await loadAnalyzedAccounts();
+        });
+
+        // Close modal on backdrop click
+        document.getElementById('detail-modal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('detail-modal')) closeModal();
+        });
+    </script>
+</body>
+</html>

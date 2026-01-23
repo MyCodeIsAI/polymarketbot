@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PolymarketBot Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        .ghost-mode-active { animation: ghost-pulse 2s ease-in-out infinite; }
+        @keyframes ghost-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4); }
+            50% { box-shadow: 0 0 0 10px rgba(139, 92, 246, 0); }
+        }
+        .ghost-badge { background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%); }
+
+        /* Help tooltip styles */
+        .help-tooltip {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            margin-left: 6px;
+            font-size: 10px;
+            font-weight: bold;
+            color: #9ca3af;
+            background: #374151;
+            border-radius: 50%;
+            cursor: help;
+            user-select: none;
+        }
+        .help-tooltip:hover { background: #4b5563; color: #e5e7eb; }
+        .help-tooltip .tooltip-text {
+            visibility: hidden;
+            opacity: 0;
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 220px;
+            padding: 8px 12px;
+            background: #1f2937;
+            border: 1px solid #4b5563;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: normal;
+            color: #d1d5db;
+            text-align: left;
+            line-height: 1.4;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            transition: opacity 0.2s, visibility 0.2s;
+        }
+        .help-tooltip .tooltip-text::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #4b5563 transparent transparent transparent;
+        }
+        .help-tooltip:hover .tooltip-text { visibility: visible; opacity: 1; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <h1 class="text-xl font-bold text-blue-400">PolymarketBot</h1>
+                <div class="flex items-center space-x-2 ml-4 border-l border-gray-700 pl-4">
+                    <a href="/" class="text-sm text-white font-medium px-3 py-1 bg-gray-700 rounded hover:bg-gray-600 transition">Dashboard</a>
+                    <a href="/discovery" class="text-sm text-gray-400 hover:text-white px-3 py-1 rounded hover:bg-gray-700 transition flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                        Discovery
+                    </a>
+                    <a href="/infrastructure" class="text-sm text-gray-400 hover:text-white px-3 py-1 rounded hover:bg-gray-700 transition flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
+                        </svg>
+                        Infrastructure
+                    </a>
+                </div>
+                <span id="connection-status" class="px-2 py-1 text-xs rounded-full bg-gray-600">
+                    Connecting...
+                </span>
+                <span id="ghost-mode-badge" class="px-2 py-1 text-xs rounded-full ghost-badge text-white hidden">
+                    GHOST MODE
+                </span>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span id="last-update" class="text-sm text-gray-400">--</span>
+                <button id="refresh-btn" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm">
+                    Refresh
+                </button>
+                <button id="settings-btn" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center" title="Settings">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-6 py-8">
+        <!-- Status Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <!-- Bot Status -->
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-gray-400 text-sm font-medium">Bot Status</h3>
+                    <span id="bot-status-indicator" class="w-3 h-3 rounded-full bg-gray-500"></span>
+                </div>
+                <p id="bot-status" class="text-2xl font-bold">--</p>
+                <p id="bot-uptime" class="text-sm text-gray-400 mt-1">--</p>
+            </div>
+
+            <!-- Balance -->
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-gray-400 text-sm font-medium mb-2">Balance</h3>
+                <p id="balance-total" class="text-2xl font-bold text-green-400">$--</p>
+                <p id="balance-available" class="text-sm text-gray-400 mt-1">Available: $--</p>
+            </div>
+
+            <!-- Total P&L -->
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-gray-400 text-sm font-medium mb-2">Total P&L</h3>
+                <p id="total-pnl" class="text-2xl font-bold">$--</p>
+                <p id="pnl-roi" class="text-sm mt-1">ROI: --%</p>
+            </div>
+
+            <!-- Active Positions -->
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-gray-400 text-sm font-medium mb-2">Active Positions</h3>
+                <p id="positions-count" class="text-2xl font-bold">--</p>
+                <p id="positions-value" class="text-sm text-gray-400 mt-1">Value: $--</p>
+            </div>
+        </div>
+
+        <!-- Control Panel -->
+        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-8" id="control-panel">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold">Control Panel</h2>
+                <div class="flex items-center space-x-2">
+                    <span class="text-sm text-gray-400">Ghost Mode</span>
+                    <button id="ghost-mode-toggle" class="relative inline-flex h-6 w-11 items-center rounded-full bg-gray-600 transition-colors focus:outline-none">
+                        <span id="ghost-mode-dot" class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-1"></span>
+                    </button>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-4">
+                <button id="start-btn" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                    Start Bot
+                </button>
+                <button id="stop-btn" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                    Stop Bot
+                </button>
+                <button id="pause-btn" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                    Pause Trading
+                </button>
+                <button id="resume-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                    Resume Trading
+                </button>
+            </div>
+            <!-- Ghost Mode Info -->
+            <div id="ghost-mode-info" class="mt-4 p-3 bg-purple-900/30 border border-purple-700 rounded hidden">
+                <div class="flex items-start space-x-2">
+                    <span class="text-purple-400 text-lg">👻</span>
+                    <div>
+                        <p class="text-sm text-purple-300 font-medium">Ghost Mode Active</p>
+                        <p class="text-xs text-purple-400 mt-1">Monitoring real trades and simulating execution without a connected wallet. API calls will be attempted but will fail (expected). Only NEW trades after start are processed - no retroactive positions.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Left Column: Positions & Trades -->
+            <div class="lg:col-span-2 space-y-8">
+                <!-- Positions Table -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700">
+                    <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                        <h2 class="text-lg font-semibold">Open Positions</h2>
+                        <span id="positions-total-value" class="text-sm text-gray-400">Total: $--</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-750">
+                                <tr class="text-left text-sm text-gray-400">
+                                    <th class="px-6 py-3">Market</th>
+                                    <th class="px-6 py-3">Side</th>
+                                    <th class="px-6 py-3">Size</th>
+                                    <th class="px-6 py-3">Avg Price</th>
+                                    <th class="px-6 py-3">Current</th>
+                                    <th class="px-6 py-3">P&L</th>
+                                    <th class="px-6 py-3">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="positions-table" class="divide-y divide-gray-700">
+                                <tr>
+                                    <td colspan="7" class="px-6 py-8 text-center text-gray-500">
+                                        No open positions
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Recent Trades -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700">
+                    <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                        <h2 class="text-lg font-semibold">Recent Trades</h2>
+                        <button id="show-all-trades" class="text-sm text-blue-400 hover:text-blue-300">
+                            View All
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-750">
+                                <tr class="text-left text-sm text-gray-400">
+                                    <th class="px-6 py-3">Time</th>
+                                    <th class="px-6 py-3">Market</th>
+                                    <th class="px-6 py-3">Side</th>
+                                    <th class="px-6 py-3">Size</th>
+                                    <th class="px-6 py-3">Price</th>
+                                    <th class="px-6 py-3">Latency</th>
+                                    <th class="px-6 py-3">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trades-table" class="divide-y divide-gray-700">
+                                <tr>
+                                    <td colspan="7" class="px-6 py-8 text-center text-gray-500">
+                                        No recent trades
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- P&L Chart -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                    <h2 class="text-lg font-semibold mb-4">P&L Over Time</h2>
+                    <div class="h-64">
+                        <canvas id="pnl-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Accounts, Alerts, Health -->
+            <div class="space-y-8">
+                <!-- Tracked Accounts -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700">
+                    <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                        <h2 class="text-lg font-semibold">Tracked Accounts</h2>
+                        <button id="add-account-btn" class="text-sm text-blue-400 hover:text-blue-300">
+                            + Add
+                        </button>
+                    </div>
+                    <div id="accounts-list" class="divide-y divide-gray-700">
+                        <div class="px-6 py-8 text-center text-gray-500">
+                            No accounts configured
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Health -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700">
+                    <div class="px-6 py-4 border-b border-gray-700">
+                        <h2 class="text-lg font-semibold">System Health</h2>
+                    </div>
+                    <div class="p-6 space-y-4">
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">API Connection</span>
+                            <span id="health-api" class="px-2 py-1 text-xs rounded-full bg-gray-600">--</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">WebSocket</span>
+                            <span id="health-ws" class="px-2 py-1 text-xs rounded-full bg-gray-600">--</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">Database</span>
+                            <span id="health-db" class="px-2 py-1 text-xs rounded-full bg-gray-600">--</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">Circuit Breaker</span>
+                            <span id="health-cb" class="px-2 py-1 text-xs rounded-full bg-gray-600">--</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">Blockchain Monitor</span>
+                            <span id="health-blockchain" class="px-2 py-1 text-xs rounded-full bg-gray-600">--</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">Memory Usage</span>
+                            <span id="health-memory" class="text-sm text-gray-300">--%</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">CPU Usage</span>
+                            <span id="health-cpu" class="text-sm text-gray-300">--%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Blockchain Monitoring Stats (shows when enabled) -->
+                <div id="blockchain-stats-panel" class="bg-gray-800 rounded-lg border border-gray-700 hidden">
+                    <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                        <h2 class="text-lg font-semibold flex items-center">
+                            <span class="text-green-400 mr-2">&#x26A1;</span> Blockchain Monitor
+                        </h2>
+                        <span id="blockchain-latency-badge" class="px-2 py-1 text-xs rounded-full bg-green-600">~2-5s</span>
+                    </div>
+                    <div class="p-6 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">Status</span>
+                            <span id="blockchain-status" class="font-medium text-green-400">Connected</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">Last Block</span>
+                            <span id="blockchain-last-block" class="font-mono text-sm">--</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">Blocks Processed</span>
+                            <span id="blockchain-blocks-processed" class="font-mono text-sm">--</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">Trades Detected</span>
+                            <span id="blockchain-trades-detected" class="font-medium text-blue-400">--</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">Avg Detection Latency</span>
+                            <span id="blockchain-avg-latency" class="font-mono text-sm text-green-400">-- ms</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Latency Monitor (CRITICAL for copy trading) -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700">
+                    <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                        <h2 class="text-lg font-semibold">Latency Monitor</h2>
+                        <span id="latency-health" class="px-2 py-1 text-xs rounded-full bg-green-600">Healthy</span>
+                    </div>
+                    <div class="p-4 space-y-3">
+                        <!-- E2E Latency (most important) -->
+                        <div class="bg-gray-750 rounded p-3">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-sm font-medium">End-to-End</span>
+                                <span id="latency-e2e" class="text-lg font-bold text-green-400">-- ms</span>
+                            </div>
+                            <div class="w-full bg-gray-700 rounded-full h-2">
+                                <div id="latency-e2e-bar" class="bg-green-500 h-2 rounded-full" style="width: 0%"></div>
+                            </div>
+                            <div class="flex justify-between text-xs text-gray-500 mt-1">
+                                <span>Target: &lt;200ms</span>
+                                <span id="latency-e2e-p95">P95: -- ms</span>
+                            </div>
+                        </div>
+
+                        <!-- Stage Breakdown -->
+                        <div class="grid grid-cols-2 gap-2 text-sm">
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Detection</span>
+                                <span id="latency-detection" class="font-mono">-- ms</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Validation</span>
+                                <span id="latency-validation" class="font-mono">-- ms</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Signing</span>
+                                <span id="latency-signing" class="font-mono">-- ms</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Submission</span>
+                                <span id="latency-submission" class="font-mono">-- ms</span>
+                            </div>
+                        </div>
+
+                        <!-- Latency Stats -->
+                        <div class="border-t border-gray-700 pt-3 mt-3">
+                            <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                                <div>
+                                    <div class="text-gray-400">Min</div>
+                                    <div id="latency-min" class="font-mono">-- ms</div>
+                                </div>
+                                <div>
+                                    <div class="text-gray-400">Avg</div>
+                                    <div id="latency-avg" class="font-mono">-- ms</div>
+                                </div>
+                                <div>
+                                    <div class="text-gray-400">Max</div>
+                                    <div id="latency-max" class="font-mono">-- ms</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Alerts -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700">
+                    <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                        <h2 class="text-lg font-semibold">Recent Alerts</h2>
+                        <button id="clear-alerts-btn" class="text-sm text-gray-400 hover:text-gray-300">
+                            Clear
+                        </button>
+                    </div>
+                    <div id="alerts-list" class="divide-y divide-gray-700 max-h-64 overflow-y-auto">
+                        <div class="px-6 py-8 text-center text-gray-500">
+                            No recent alerts
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Stats -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                    <h2 class="text-lg font-semibold mb-4">Trading Stats</h2>
+                    <div class="space-y-3">
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Trades Detected</span>
+                            <span id="stats-total-trades" class="font-medium">--</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Would Execute</span>
+                            <span id="stats-would-execute" class="font-medium text-green-400">--</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Filtered (Keyword)</span>
+                            <span id="stats-filtered-keyword" class="font-medium text-yellow-400">--</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Filtered (Stoploss)</span>
+                            <span id="stats-filtered-stoploss" class="font-medium text-red-400">--</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Filtered (Slippage)</span>
+                            <span id="stats-filtered-slippage" class="font-medium text-orange-400">--</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Missed (Offline)</span>
+                            <span id="stats-missed-offline" class="font-medium text-gray-500">--</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Avg Latency</span>
+                            <span id="stats-latency" class="font-medium">-- ms</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Account Modal -->
+    <div id="account-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-lg p-6 w-full max-w-lg mx-4 border border-gray-700 max-h-[90vh] overflow-y-auto">
+            <h3 id="account-modal-title" class="text-lg font-semibold mb-4">Add Tracked Account</h3>
+            <form id="account-form" class="space-y-4">
+                <input type="hidden" name="account_id" value="">
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                        Username / Account Name
+                        <span class="help-tooltip">?<span class="tooltip-text">The Polymarket username of the trader you want to copy. Their wallet address will be looked up automatically when you leave this field.</span></span>
+                    </label>
+                    <input type="text" name="name" required placeholder="e.g. automatedaitradingbot"
+                        class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                        Wallet Address
+                        <span class="help-tooltip">?<span class="tooltip-text">The Polygon wallet address of the trader. Auto-fills from username, but you can enter manually if lookup fails.</span></span>
+                    </label>
+                    <input type="text" name="wallet" required placeholder="0x... (auto-fills from username)"
+                        class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none font-mono text-sm">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                            Position Ratio
+                            <span class="help-tooltip">?<span class="tooltip-text">Multiplier for position sizing. If target buys $1000 and ratio is 0.01, you'll buy $10. Use 1.0 to match exactly, or smaller values to scale down risk.</span></span>
+                        </label>
+                        <input type="number" name="ratio" required value="0.01" step="0.001" min="0.001" max="1"
+                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                            Max Position ($)
+                            <span class="help-tooltip">?<span class="tooltip-text">Hard cap on any single position size in USD. Even if ratio would give a larger amount, this limit applies. Protects against copying huge trades.</span></span>
+                        </label>
+                        <input type="number" name="max_position" required value="500" min="1"
+                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                    </div>
+                </div>
+
+                <!-- Tiered Slippage Settings -->
+                <div class="border-t border-gray-700 pt-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-sm font-medium text-gray-300 flex items-center">
+                            Tiered Slippage
+                            <span class="help-tooltip">?<span class="tooltip-text">Smart slippage protection based on entry price. Low-odds bets (cheap shares) can tolerate more slippage because they have more potential upside. High-odds bets need tighter slippage since the edge is smaller.</span></span>
+                        </h4>
+                        <label class="flex items-center space-x-2 text-sm">
+                            <input type="checkbox" name="use_tiered_slippage" checked
+                                class="rounded bg-gray-700 border-gray-600 text-blue-500 focus:ring-blue-500">
+                            <span class="text-gray-400">Enable</span>
+                        </label>
+                    </div>
+                    <p class="text-xs text-gray-500 mb-3">Max slippage % allowed at each price tier. Example: 300% at 0-5¢ means a 1¢ price can slip to 4¢ max.</p>
+
+                    <div class="grid grid-cols-4 gap-2 text-xs" id="slippage-tiers">
+                        <div>
+                            <label class="block text-gray-500 mb-1">0-5¢</label>
+                            <input type="number" name="tier_5" value="300" step="10" min="0" max="1000"
+                                class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                            <span class="text-gray-600">%</span>
+                        </div>
+                        <div>
+                            <label class="block text-gray-500 mb-1">5-10¢</label>
+                            <input type="number" name="tier_10" value="200" step="10" min="0" max="500"
+                                class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                            <span class="text-gray-600">%</span>
+                        </div>
+                        <div>
+                            <label class="block text-gray-500 mb-1">10-20¢</label>
+                            <input type="number" name="tier_20" value="100" step="5" min="0" max="300"
+                                class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                            <span class="text-gray-600">%</span>
+                        </div>
+                        <div>
+                            <label class="block text-gray-500 mb-1">20-35¢</label>
+                            <input type="number" name="tier_35" value="50" step="5" min="0" max="200"
+                                class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                            <span class="text-gray-600">%</span>
+                        </div>
+                        <div>
+                            <label class="block text-gray-500 mb-1">35-50¢</label>
+                            <input type="number" name="tier_50" value="30" step="5" min="0" max="100"
+                                class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                            <span class="text-gray-600">%</span>
+                        </div>
+                        <div>
+                            <label class="block text-gray-500 mb-1">50-70¢</label>
+                            <input type="number" name="tier_70" value="20" step="2" min="0" max="50"
+                                class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                            <span class="text-gray-600">%</span>
+                        </div>
+                        <div>
+                            <label class="block text-gray-500 mb-1">70-85¢</label>
+                            <input type="number" name="tier_85" value="12" step="1" min="0" max="30"
+                                class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                            <span class="text-gray-600">%</span>
+                        </div>
+                        <div>
+                            <label class="block text-gray-500 mb-1">85-100¢</label>
+                            <input type="number" name="tier_100" value="6" step="1" min="0" max="20"
+                                class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                            <span class="text-gray-600">%</span>
+                        </div>
+                    </div>
+
+                    <!-- Flat slippage fallback (shown when tiered is disabled) -->
+                    <div id="flat-slippage-section" class="hidden mt-3">
+                        <label class="block text-sm text-gray-400 mb-1">Flat Slippage Tolerance (%)</label>
+                        <input type="number" name="flat_slippage" value="5" step="0.5" min="0.5" max="100"
+                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                    </div>
+                </div>
+
+                <!-- Keywords Filter -->
+                <div class="border-t border-gray-700 pt-4">
+                    <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                        Keywords Filter
+                        <span class="help-tooltip">?<span class="tooltip-text">Only copy trades from markets whose titles contain ANY of these keywords. Great for focusing on specific categories like weather, sports, or politics. Leave empty to copy ALL trades.</span></span>
+                    </label>
+                    <input type="text" name="keywords" placeholder="temperature, weather, celsius, fahrenheit"
+                        class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                    <p class="text-xs text-gray-500 mt-1">Comma-separated. Case-insensitive matching.</p>
+                </div>
+
+                <!-- Stoploss Settings -->
+                <div class="border-t border-gray-700 pt-4">
+                    <h4 class="text-sm font-medium text-gray-300 mb-3 flex items-center">
+                        Account Stoploss
+                        <span class="help-tooltip">?<span class="tooltip-text">Monitors the target trader's overall performance. If they experience a significant drawdown, we pause copying their new trades (but still allow closing existing positions).</span></span>
+                    </h4>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                            Max Drawdown (%)
+                            <span class="help-tooltip">?<span class="tooltip-text">If the target trader's portfolio drops by this percentage from their peak, stop copying new trades. Protects you from copying during a losing streak. Default 15% is conservative.</span></span>
+                        </label>
+                        <input type="number" name="max_drawdown" required value="15" step="1" min="1" max="100"
+                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                    </div>
+                </div>
+
+                <!-- Advanced Risk Settings -->
+                <div class="border-t border-gray-700 pt-4">
+                    <details class="group">
+                        <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-300 mb-3">
+                            <span class="flex items-center">
+                                Advanced Risk Settings
+                                <span class="help-tooltip">?<span class="tooltip-text">Fine-tune position-level risk controls including take-profit, stop-loss, and trade limits. These provide additional safety beyond account-level stoploss.</span></span>
+                            </span>
+                            <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </summary>
+
+                        <div class="space-y-4 mt-3 pl-2 border-l-2 border-gray-700">
+                            <!-- Take Profit / Stop Loss -->
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                                        Take Profit (%)
+                                        <span class="help-tooltip">?<span class="tooltip-text">Automatically close positions when profit reaches this percentage. Set to 0 to disable. Example: 50% means if you buy at 10¢ and price hits 15¢, position closes automatically.</span></span>
+                                    </label>
+                                    <input type="number" name="take_profit_pct" value="0" step="5" min="0" max="500"
+                                        class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                                    <p class="text-xs text-gray-500 mt-1">0 = disabled</p>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                                        Stop Loss (%)
+                                        <span class="help-tooltip">?<span class="tooltip-text">Automatically close positions when loss reaches this percentage. Set to 0 to disable. Example: 30% means if you buy at 10¢ and price drops to 7¢, position closes automatically.</span></span>
+                                    </label>
+                                    <input type="number" name="stop_loss_pct" value="0" step="5" min="0" max="100"
+                                        class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                                    <p class="text-xs text-gray-500 mt-1">0 = disabled</p>
+                                </div>
+                            </div>
+
+                            <!-- Max Concurrent Trades -->
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                                    Max Concurrent Positions
+                                    <span class="help-tooltip">?<span class="tooltip-text">Limit the number of open positions at once for this account. Prevents over-concentration. Set to 0 for unlimited. Recommended: 3-10 depending on your risk tolerance.</span></span>
+                                </label>
+                                <input type="number" name="max_concurrent" value="0" step="1" min="0" max="100"
+                                    class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                                <p class="text-xs text-gray-500 mt-1">0 = unlimited</p>
+                            </div>
+
+                            <!-- Holding Time Limit -->
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                                    Max Holding Time (hours)
+                                    <span class="help-tooltip">?<span class="tooltip-text">Automatically close positions after this many hours regardless of P/L. Prevents capital from being locked in stale positions. Set to 0 to disable. Recommended: 24-72 hours.</span></span>
+                                </label>
+                                <input type="number" name="max_holding_hours" value="0" step="1" min="0" max="720"
+                                    class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                                <p class="text-xs text-gray-500 mt-1">0 = disabled (hold until target closes)</p>
+                            </div>
+
+                            <!-- Min Liquidity -->
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                                    Min Market Liquidity ($)
+                                    <span class="help-tooltip">?<span class="tooltip-text">Skip trades on markets with less than this amount of liquidity. Low liquidity means high slippage and difficulty exiting. Recommended: $1000+ for safety.</span></span>
+                                </label>
+                                <input type="number" name="min_liquidity" value="0" step="100" min="0" max="100000"
+                                    class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                                <p class="text-xs text-gray-500 mt-1">0 = no minimum (copy all markets)</p>
+                            </div>
+
+                            <!-- Cooldown Period -->
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                                    Retry Cooldown (seconds)
+                                    <span class="help-tooltip">?<span class="tooltip-text">Wait this long between retry attempts if an order fails. Prevents hammering the API during issues. Default 10 seconds is recommended.</span></span>
+                                </label>
+                                <input type="number" name="cooldown_seconds" value="10" step="1" min="1" max="300"
+                                    class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none">
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
+                <div class="flex justify-end space-x-3 pt-4 border-t border-gray-700">
+                    <button type="button" id="cancel-account-modal" class="px-4 py-2 text-gray-400 hover:text-gray-300">
+                        Cancel
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium">
+                        Save Account
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4 border border-gray-700 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-lg font-semibold">Settings</h3>
+                <button id="close-settings-modal" class="text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Blockchain Monitoring Section -->
+            <div class="mb-6">
+                <h4 class="text-md font-medium text-blue-400 mb-4 flex items-center">
+                    <span class="mr-2">&#x26A1;</span> Blockchain Monitoring (Speed Boost)
+                </h4>
+
+                <div class="bg-gray-900/50 rounded-lg p-4 mb-4 border border-gray-700">
+                    <p class="text-sm text-gray-300 mb-3">
+                        Enable real-time blockchain monitoring for <strong class="text-green-400">~2-5 second latency</strong> instead of ~15-21 seconds with API polling.
+                        This monitors Polygon blockchain directly to detect trades faster than any competitor.
+                    </p>
+
+                    <div class="flex items-center space-x-2 mb-4">
+                        <span id="blockchain-config-status" class="px-2 py-1 text-xs rounded-full bg-gray-600">Not Configured</span>
+                        <span id="blockchain-enabled-badge" class="px-2 py-1 text-xs rounded-full bg-gray-600 hidden">Enabled</span>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1 flex items-center">
+                                Polygon RPC URL (WebSocket preferred)
+                                <span class="help-tooltip">?<span class="tooltip-text">A WebSocket RPC URL from a provider like Alchemy. Format: wss://polygon-mainnet.g.alchemy.com/v2/YOUR_API_KEY</span></span>
+                            </label>
+                            <input type="text" id="rpc-url-input" placeholder="wss://polygon-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+                                class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 focus:outline-none font-mono text-sm">
+                        </div>
+
+                        <div class="flex items-center space-x-3">
+                            <button id="save-rpc-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium text-sm">
+                                Save & Connect
+                            </button>
+                            <button id="test-rpc-btn" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded font-medium text-sm">
+                                Test Connection
+                            </button>
+                            <span id="rpc-test-result" class="text-sm"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- How to Get RPC URL -->
+                <details class="bg-gray-900/30 rounded-lg border border-gray-700">
+                    <summary class="px-4 py-3 cursor-pointer text-sm font-medium text-gray-300 hover:text-white flex items-center justify-between">
+                        <span>How to get a free Polygon RPC URL</span>
+                        <svg class="w-4 h-4 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </summary>
+                    <div class="px-4 pb-4 text-sm text-gray-400 space-y-3">
+                        <div class="border-l-2 border-blue-500 pl-3 py-1">
+                            <p class="font-medium text-blue-400">Recommended: Alchemy (Free tier: 300M compute units/month)</p>
+                        </div>
+                        <ol class="list-decimal list-inside space-y-2 ml-2">
+                            <li>Go to <a href="https://dashboard.alchemy.com/signup" target="_blank" class="text-blue-400 hover:underline">dashboard.alchemy.com/signup</a></li>
+                            <li>Create a free account (no credit card required)</li>
+                            <li>Click <strong>"Create new app"</strong></li>
+                            <li>Select <strong>"Polygon"</strong> as the chain and <strong>"Mainnet"</strong> as network</li>
+                            <li>Give it a name like "PolymarketBot"</li>
+                            <li>Click <strong>"View Key"</strong> on your new app</li>
+                            <li>Copy the <strong>WebSocket URL</strong> (starts with wss://)</li>
+                            <li>Paste it in the field above</li>
+                        </ol>
+                        <div class="bg-gray-800 rounded p-3 mt-3">
+                            <p class="text-xs text-gray-500 mb-1">Example URL format:</p>
+                            <code class="text-xs text-green-400 break-all">wss://polygon-mainnet.g.alchemy.com/v2/abc123xyz789...</code>
+                        </div>
+                        <div class="border-l-2 border-yellow-500 pl-3 py-1 mt-3">
+                            <p class="text-yellow-400 text-xs">
+                                <strong>Alternatives:</strong> Infura, QuickNode, or any Polygon WebSocket RPC provider.
+                                The free tier on Alchemy is more than enough for copy trading.
+                            </p>
+                        </div>
+                    </div>
+                </details>
+            </div>
+
+            <!-- Environment Variables Section -->
+            <div class="mb-6">
+                <h4 class="text-md font-medium text-gray-300 mb-4">Environment Variables</h4>
+                <div class="bg-gray-900/30 rounded-lg p-4 border border-gray-700">
+                    <p class="text-sm text-gray-400 mb-3">
+                        You can also set the RPC URL via environment variable:
+                    </p>
+                    <div class="bg-gray-800 rounded p-3">
+                        <code class="text-xs text-green-400">POLYGON_RPC_URL=wss://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY</code>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">
+                        Add this to your <code class="text-gray-400">.env</code> file or set it in your shell before running the bot.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Current Configuration Status -->
+            <div class="border-t border-gray-700 pt-4">
+                <h4 class="text-md font-medium text-gray-300 mb-3">Current Configuration</h4>
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Blockchain Module</span>
+                        <span id="config-blockchain-module" class="font-medium">--</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">RPC Configured</span>
+                        <span id="config-rpc-status" class="font-medium">--</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Monitor Active</span>
+                        <span id="config-monitor-active" class="font-medium">--</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Wallets Monitored</span>
+                        <span id="config-wallets-count" class="font-medium">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="fixed bottom-4 right-4 space-y-2 z-50"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

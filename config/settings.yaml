@@ -1,0 +1,121 @@
+# Polymarket Copy-Trading Bot - Settings Configuration
+# ====================================================
+#
+# This file contains operational settings for the bot.
+# These can typically remain at default values, but tune as needed.
+
+# Polling intervals
+# These control how often we check for new trades and reconcile positions
+polling:
+  # Milliseconds between checking each target's activity
+  # Lower = faster detection, but more API calls
+  # Range: 100-5000ms, Default: 200ms
+  # At 200ms with 5 targets = 25 requests/second (well within limits)
+  activity_interval_ms: 200
+
+  # Seconds between full position reconciliation
+  # This catches any trades we might have missed
+  # Range: 10-600s, Default: 60s
+  positions_sync_interval_s: 60
+
+  # Seconds between checking our USDC balance
+  # Range: 10-300s, Default: 30s
+  balance_check_interval_s: 30
+
+  # Order book cache TTL in milliseconds
+  # Cached order book is used for slippage calculations
+  # Range: 50-1000ms, Default: 100ms
+  orderbook_cache_ms: 100
+
+# Order execution settings
+execution:
+  # Seconds to wait for an order to fill before timing out
+  # Range: 5-300s, Default: 30s
+  order_timeout_s: 30
+
+  # Maximum retry attempts for failed orders
+  # Range: 0-10, Default: 3
+  max_retries: 3
+
+  # Delay between retry attempts in milliseconds
+  # Range: 100-5000ms, Default: 500ms
+  retry_delay_ms: 500
+
+  # Minutes until unfilled limit orders expire
+  # Used for GTD (Good-Til-Date) orders
+  # Range: 1-60min, Default: 5min
+  order_expiry_minutes: 5
+
+  # Use Fill-or-Kill orders (all or nothing)
+  # true = order must fill completely or cancel
+  # false = allow partial fills (recommended)
+  use_fill_or_kill: false
+
+# Safety limits and circuit breakers
+# These protect you from excessive losses
+safety:
+  # Maximum loss in 24 hours before halting all trading
+  # Bot will stop and alert you if this is exceeded
+  max_daily_loss_usd: 1000
+
+  # Maximum number of open positions across all targets
+  max_open_positions: 50
+
+  # Check order book depth before executing
+  # Ensures there's enough liquidity for the trade
+  require_liquidity_check: true
+
+  # Minimum USD depth in order book to proceed with trade
+  min_book_depth_usd: 100
+
+  # Number of consecutive failed orders before pausing
+  max_consecutive_failures: 5
+
+  # Minimum USDC balance to maintain
+  # Trading pauses if balance drops below this
+  min_balance_usd: 50
+
+  # Maximum drift from target position before alerting
+  # 0.2 = 20% difference triggers alert
+  max_position_drift_percent: 0.20
+
+# Network settings
+network:
+  # HTTP request timeout in seconds
+  api_timeout_s: 10
+
+  # Number of HTTP connections to keep open
+  connection_pool_size: 20
+
+  # WebSocket ping interval (keepalive)
+  websocket_ping_interval_s: 5
+
+  # Delay before reconnecting WebSocket
+  websocket_reconnect_delay_s: 5
+
+  # Maximum consecutive WebSocket reconnection attempts
+  max_websocket_reconnects: 10
+
+# Database settings
+database:
+  # Environment variable for database URL
+  # If not set, uses SQLite in current directory
+  url_env: "POLYBOT_DATABASE_URL"
+
+  # Default database URL (SQLite for development)
+  default_url: "sqlite+aiosqlite:///polymarketbot.db"
+
+  # Log SQL queries (for debugging only)
+  echo_sql: false
+
+# API endpoints (do not modify unless Polymarket changes URLs)
+endpoints:
+  clob_http: "https://clob.polymarket.com"
+  clob_ws: "wss://ws-subscriptions-clob.polymarket.com/ws/"
+  data_api: "https://data-api.polymarket.com"
+  gamma_api: "https://gamma-api.polymarket.com"
+
+  # Polygon RPC endpoint
+  # Use a provider like Alchemy, QuickNode, or Infura for reliability
+  polygon_rpc_env: "POLYBOT_POLYGON_RPC"
+  default_polygon_rpc: "https://polygon-rpc.com"  # Public endpoint (rate limited)

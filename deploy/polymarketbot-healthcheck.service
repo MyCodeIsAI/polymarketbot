@@ -1,0 +1,38 @@
+[Unit]
+Description=PolymarketBot Health Check
+Documentation=https://github.com/yourusername/polymarketbot
+After=polymarketbot.service
+Requires=polymarketbot.service
+
+[Service]
+Type=oneshot
+User=polybot
+Group=polybot
+WorkingDirectory=/opt/polymarketbot
+EnvironmentFile=/opt/polymarketbot/.env
+
+ExecStart=/opt/polymarketbot/venv/bin/python -c "
+import sys
+sys.path.insert(0, '/opt/polymarketbot')
+from src.cli import main
+# Simple health check - verify bot is responsive
+# This would call a health endpoint or check PID
+import os
+pid_file = '/opt/polymarketbot/polybot.pid'
+if os.path.exists(pid_file):
+    with open(pid_file) as f:
+        pid = int(f.read().strip())
+    try:
+        os.kill(pid, 0)
+        print('Bot is running')
+        sys.exit(0)
+    except ProcessLookupError:
+        print('Bot PID file exists but process not found')
+        sys.exit(1)
+else:
+    print('Bot is not running')
+    sys.exit(1)
+"
+
+# On failure, restart the main service
+ExecStopPost=/bin/bash -c 'if [ "$EXIT_STATUS" != "0" ]; then systemctl restart polymarketbot; fi'

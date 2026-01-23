@@ -1,0 +1,85 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+.nox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+config/accounts.yaml  # Contains wallet addresses
+polymarketbot.db
+
+# Sensitive runtime files
+ghost_state.json      # Contains tracked wallet addresses
+data/user_prefs.json  # Contains user watchlist/preferences
+proxy_config.json     # May contain proxy credentials
+.polybot.env          # Environment variables with secrets
+*.polybot.env         # Any polybot env files
+
+# Credentials
+*credentials*.json
+*secret*.json
+*private*.json
+*api_key*.txt

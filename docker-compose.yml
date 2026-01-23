@@ -1,0 +1,60 @@
+# PolymarketBot - Docker Compose Configuration
+# One-command deployment: docker compose up -d
+
+version: '3.8'
+
+services:
+  polymarketbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: polymarketbot
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8765}:8765"
+    volumes:
+      # Persist state between restarts
+      - polybot-data:/app/data
+      - ./ghost_state.json:/app/ghost_state.json
+      - ./proxy_config.json:/app/proxy_config.json
+    environment:
+      - PORT=8765
+      - TZ=${TZ:-UTC}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # Optimize for low latency
+    sysctls:
+      - net.core.somaxconn=65535
+      - net.ipv4.tcp_tw_reuse=1
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  polybot-data:
+    driver: local
+
+# Network optimizations for trading
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1500

@@ -1,0 +1,50 @@
+[Unit]
+Description=PolymarketBot Copy-Trading Service
+Documentation=https://github.com/yourusername/polymarketbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=polybot
+Group=polybot
+WorkingDirectory=/opt/polymarketbot
+
+# Environment
+EnvironmentFile=/opt/polymarketbot/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Execution
+ExecStart=/opt/polymarketbot/venv/bin/python -m src.cli start
+ExecStop=/opt/polymarketbot/venv/bin/python -m src.cli stop
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/opt/polymarketbot/data /opt/polymarketbot/logs
+
+# Resource limits
+MemoryMax=2G
+CPUQuota=80%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=polymarketbot
+
+[Install]
+WantedBy=multi-user.target

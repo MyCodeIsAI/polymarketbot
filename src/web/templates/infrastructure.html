@@ -1,0 +1,1508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infrastructure & Speed - PolymarketBot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent-green: #238636;
+            --accent-blue: #58a6ff;
+            --accent-red: #f85149;
+            --accent-yellow: #d29922;
+            --accent-purple: #8b5cf6;
+            --accent-orange: #f0883e;
+            --border-color: #30363d;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+
+        .logo { font-size: 1.5rem; font-weight: 600; color: var(--accent-blue); }
+
+        nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            margin-left: 20px;
+            transition: color 0.2s;
+        }
+
+        nav a:hover, nav a.active { color: var(--accent-blue); }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .card.highlight {
+            border-color: var(--accent-green);
+            background: linear-gradient(135deg, rgba(35, 134, 54, 0.1), var(--bg-secondary));
+        }
+
+        .card.warning { border-color: var(--accent-yellow); }
+        .card.danger { border-color: var(--accent-red); }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .card-title { font-size: 1.1rem; font-weight: 600; }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .badge-green { background: rgba(35, 134, 54, 0.2); color: #3fb950; }
+        .badge-red { background: rgba(248, 81, 73, 0.2); color: #f85149; }
+        .badge-yellow { background: rgba(210, 153, 34, 0.2); color: #d29922; }
+        .badge-blue { background: rgba(88, 166, 255, 0.2); color: #58a6ff; }
+        .badge-purple { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
+        .badge-orange { background: rgba(240, 136, 62, 0.2); color: #f0883e; }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: var(--text-secondary); }
+        .info-value { font-weight: 500; font-family: 'SF Mono', Monaco, monospace; }
+
+        .latency-excellent { color: #3fb950; }
+        .latency-good { color: #58a6ff; }
+        .latency-ok { color: #d29922; }
+        .latency-bad { color: #f85149; }
+
+        .section-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin: 40px 0 20px 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .section-desc {
+            color: var(--text-secondary);
+            margin-bottom: 20px;
+            font-size: 0.95rem;
+        }
+
+        .form-group { margin-bottom: 15px; }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary { background: var(--accent-blue); color: white; }
+        .btn-primary:hover { background: #4a9eff; }
+        .btn-success { background: var(--accent-green); color: white; }
+        .btn-outline { background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); }
+        .btn-outline:hover { background: var(--bg-tertiary); }
+
+        .toggle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+        }
+
+        .toggle { position: relative; width: 50px; height: 26px; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: var(--bg-tertiary);
+            transition: 0.3s;
+            border-radius: 26px;
+            border: 1px solid var(--border-color);
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: var(--text-secondary);
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle input:checked + .toggle-slider {
+            background-color: var(--accent-green);
+            border-color: var(--accent-green);
+        }
+
+        .toggle input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+            background-color: white;
+        }
+
+        /* Impact Rating */
+        .impact-rating {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .impact-critical {
+            background: rgba(248, 81, 73, 0.2);
+            color: #f85149;
+        }
+
+        .impact-high {
+            background: rgba(240, 136, 62, 0.2);
+            color: #f0883e;
+        }
+
+        .impact-medium {
+            background: rgba(210, 153, 34, 0.2);
+            color: #d29922;
+        }
+
+        .impact-low {
+            background: rgba(88, 166, 255, 0.2);
+            color: #58a6ff;
+        }
+
+        /* Latency Tier Cards */
+        .latency-tiers {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .tier-card {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .tier-card.tier-excellent { border-left: 4px solid #3fb950; }
+        .tier-card.tier-good { border-left: 4px solid #58a6ff; }
+        .tier-card.tier-acceptable { border-left: 4px solid #d29922; }
+        .tier-card.tier-poor { border-left: 4px solid #f85149; }
+
+        .tier-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .tier-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 5px;
+        }
+
+        /* Optimization Table */
+        .opt-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            margin: 15px 0;
+        }
+
+        .opt-table th, .opt-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .opt-table th {
+            color: var(--text-secondary);
+            font-weight: 500;
+            background: var(--bg-tertiary);
+        }
+
+        .opt-table tr:hover { background: var(--bg-tertiary); }
+
+        .opt-table a {
+            color: var(--accent-blue);
+            text-decoration: none;
+        }
+
+        /* Insight/Warning Boxes */
+        .insight-box {
+            background: linear-gradient(135deg, rgba(88, 166, 255, 0.1), var(--bg-tertiary));
+            border: 1px solid var(--accent-blue);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .insight-box.warning {
+            background: linear-gradient(135deg, rgba(210, 153, 34, 0.1), var(--bg-tertiary));
+            border-color: var(--accent-yellow);
+        }
+
+        .insight-box.success {
+            background: linear-gradient(135deg, rgba(35, 134, 54, 0.1), var(--bg-tertiary));
+            border-color: var(--accent-green);
+        }
+
+        .insight-box.danger {
+            background: linear-gradient(135deg, rgba(248, 81, 73, 0.1), var(--bg-tertiary));
+            border-color: var(--accent-red);
+        }
+
+        .insight-box h4 {
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* VPS Cards */
+        .vps-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-top: 15px;
+        }
+
+        .vps-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .vps-card.recommended {
+            border-color: var(--accent-green);
+            position: relative;
+        }
+
+        .vps-card.recommended::before {
+            content: "BEST";
+            position: absolute;
+            top: -10px;
+            right: 15px;
+            background: var(--accent-green);
+            color: white;
+            padding: 2px 10px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .vps-card.blocked {
+            border-color: var(--accent-red);
+            opacity: 0.7;
+        }
+
+        .vps-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .vps-location { font-weight: 600; font-size: 1.1rem; }
+
+        .vps-latency {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .provider-list { margin-top: 15px; }
+
+        .provider-item {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 10px;
+            padding: 10px;
+            margin: 5px 0;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+
+        .provider-item a {
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .provider-notes {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+        }
+
+        /* Benchmark Results */
+        .benchmark-row {
+            display: grid;
+            grid-template-columns: 1fr repeat(4, 80px);
+            gap: 10px;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.9rem;
+        }
+
+        .benchmark-row.header {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        /* Tips List */
+        .tips-list {
+            list-style: none;
+            margin-top: 10px;
+        }
+
+        .tips-list li {
+            padding: 10px 0;
+            padding-left: 30px;
+            position: relative;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tips-list li:before {
+            position: absolute;
+            left: 0;
+            font-size: 1.1rem;
+        }
+
+        .tips-list li.tip-speed:before { content: "\26A1"; }
+        .tips-list li.tip-check:before { content: "\2705"; }
+        .tips-list li.tip-warn:before { content: "\26A0\FE0F"; }
+        .tips-list li.tip-server:before { content: "\1F5A5\FE0F"; }
+        .tips-list li.tip-money:before { content: "\1F4B0"; }
+        .tips-list li.tip-lock:before { content: "\1F512"; }
+        .tips-list li.tip-fire:before { content: "\1F525"; }
+
+        .tips-list li:last-child { border-bottom: none; }
+
+        /* Warning/Success Boxes */
+        .warning-box {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid var(--accent-red);
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+
+        .warning-box h4 { color: var(--accent-red); margin-bottom: 5px; }
+
+        .success-box {
+            background: rgba(35, 134, 54, 0.1);
+            border: 1px solid var(--accent-green);
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+
+        .success-box h4 { color: #3fb950; margin-bottom: 5px; }
+
+        /* Code Block */
+        .code-block {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 15px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            margin: 10px 0;
+            white-space: pre-wrap;
+        }
+
+        .code-block .comment { color: #6e7681; }
+        .code-block .cmd { color: #79c0ff; }
+        .code-block .value { color: #a5d6ff; }
+
+        /* Step indicator */
+        .step-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            background: var(--accent-blue);
+            color: white;
+            border-radius: 50%;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-right: 10px;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+
+        .stat-box {
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 5px;
+        }
+
+        /* Architecture Diagram */
+        .architecture-diagram {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 20px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.75rem;
+            white-space: pre;
+            overflow-x: auto;
+            line-height: 1.4;
+        }
+
+        /* Loading Spinner */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border-color);
+            border-radius: 50%;
+            border-top-color: var(--accent-blue);
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .geo-status { text-align: center; padding: 20px; }
+        .geo-status .icon { font-size: 3rem; margin-bottom: 10px; }
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+
+        /* Collapsible */
+        .collapsible { cursor: pointer; }
+        .collapsible-content { display: none; padding-top: 15px; }
+        .collapsible-content.open { display: block; }
+
+        @media (max-width: 768px) {
+            .latency-tiers { grid-template-columns: repeat(2, 1fr); }
+            .grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation (Tailwind - consistent with other pages) -->
+    <nav class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+        <div class="flex items-center justify-between max-w-7xl mx-auto">
+            <div class="flex items-center space-x-4">
+                <h1 class="text-xl font-bold text-blue-400">PolymarketBot</h1>
+                <div class="flex items-center space-x-2 ml-4 border-l border-gray-700 pl-4">
+                    <a href="/" class="text-sm text-gray-400 hover:text-white px-3 py-1 rounded hover:bg-gray-700 transition">Dashboard</a>
+                    <a href="/discovery" class="text-sm text-gray-400 hover:text-white px-3 py-1 rounded hover:bg-gray-700 transition flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                        Discovery
+                    </a>
+                    <a href="/infrastructure" class="text-sm text-white font-medium px-3 py-1 bg-gray-700 rounded transition flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
+                        </svg>
+                        Infrastructure
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+
+        <!-- TLDR -->
+        <div class="insight-box success">
+            <h4><span style="font-size: 1.3rem;">Optimal Setup Summary</span></h4>
+            <p><strong>Amsterdam VPS + Ubuntu 22.04 + TCP Tuning = 2-5ms latency for ~&euro;5-30/month</strong></p>
+            <p style="margin-top: 10px; color: var(--text-secondary);">Deploy on Hetzner (best value) or QuantVPS (trading-optimized) with native IP. No proxy needed. Apply the kernel tuning below for optimal performance.</p>
+            <div class="stats-grid" style="margin-top: 15px;">
+                <div class="stat-box">
+                    <div class="stat-value latency-excellent">2-5ms</div>
+                    <div class="stat-label">Network Latency</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value latency-good">&lt;100ms</div>
+                    <div class="stat-label">Total Execution</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">&euro;5-30</div>
+                    <div class="stat-label">/month</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Connection Status -->
+        <div class="grid">
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Your Connection Status</span>
+                    <button class="btn btn-outline" onclick="checkGeoStatus()">Check</button>
+                </div>
+                <div id="geo-status" class="geo-status">
+                    <div class="loading"></div>
+                    <p>Checking connection...</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Polymarket Infrastructure</span>
+                    <span class="badge badge-blue">AWS</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Primary Servers</span>
+                    <span class="info-value">London, UK (eu-west-2)</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Backup Servers</span>
+                    <span class="info-value">Dublin, Ireland (eu-west-1)</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">CLOB API</span>
+                    <span class="info-value">clob.polymarket.com</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">WebSocket</span>
+                    <span class="info-value">ws-subscriptions-clob.polymarket.com</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- VPS SETUP GUIDE -->
+        <!-- ========================================== -->
+        <h2 class="section-title">Complete VPS Setup Guide</h2>
+        <p class="section-desc">Step-by-step instructions for setting up an optimized trading VPS from scratch. Each step includes its impact on latency.</p>
+
+        <!-- Step 1: Choose Provider -->
+        <div class="card" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <span class="card-title"><span class="step-number">1</span>Choose VPS Provider & Plan</span>
+                <span class="impact-rating impact-critical">CRITICAL: -50-80ms</span>
+            </div>
+            <p style="margin-bottom: 15px;">Location is the single most important factor. Amsterdam gives 2-5ms to Polymarket's London servers.</p>
+
+            <table class="opt-table">
+                <thead>
+                    <tr>
+                        <th>Provider</th>
+                        <th>Location</th>
+                        <th>Recommended Plan</th>
+                        <th>Price</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><a href="https://hetzner.com/cloud" target="_blank">Hetzner Cloud</a></td>
+                        <td>Falkenstein/Helsinki</td>
+                        <td>CPX11 (2 vCPU, 2GB RAM)</td>
+                        <td>&euro;4.15/mo</td>
+                        <td><span class="badge badge-green">Best Value</span> Excellent network, EU-based</td>
+                    </tr>
+                    <tr>
+                        <td><a href="https://quantvps.com" target="_blank">QuantVPS</a></td>
+                        <td>Amsterdam</td>
+                        <td>Trader Basic</td>
+                        <td>$29/mo</td>
+                        <td><span class="badge badge-purple">Trading Optimized</span> Pre-tuned for low latency</td>
+                    </tr>
+                    <tr>
+                        <td><a href="https://vultr.com" target="_blank">Vultr</a></td>
+                        <td>Amsterdam</td>
+                        <td>Cloud Compute (1 vCPU, 1GB)</td>
+                        <td>$5/mo</td>
+                        <td>Easy setup, good network</td>
+                    </tr>
+                    <tr>
+                        <td><a href="https://digitalocean.com" target="_blank">DigitalOcean</a></td>
+                        <td>AMS3</td>
+                        <td>Basic Droplet (1 vCPU, 1GB)</td>
+                        <td>$6/mo</td>
+                        <td>Great docs, reliable</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="insight-box" style="margin-top: 15px;">
+                <h4>Minimum Specs for Copy Trading</h4>
+                <p><strong>1 vCPU, 1GB RAM, 20GB SSD</strong> is sufficient. The bot is lightweight. You're paying for <em>network quality</em>, not compute power.</p>
+            </div>
+        </div>
+
+        <!-- Step 2: OS Selection -->
+        <div class="card" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <span class="card-title"><span class="step-number">2</span>Operating System Selection</span>
+                <span class="impact-rating impact-medium">MEDIUM: -2-5ms</span>
+            </div>
+
+            <table class="opt-table">
+                <thead>
+                    <tr>
+                        <th>OS</th>
+                        <th>Version</th>
+                        <th>Recommendation</th>
+                        <th>Why</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Ubuntu Server</strong></td>
+                        <td>22.04 LTS</td>
+                        <td><span class="badge badge-green">Recommended</span></td>
+                        <td>Stable, well-documented, modern kernel (5.15+), LTS support until 2027</td>
+                    </tr>
+                    <tr>
+                        <td>Debian</td>
+                        <td>12 (Bookworm)</td>
+                        <td><span class="badge badge-blue">Good</span></td>
+                        <td>Minimal, stable, slightly lower memory footprint</td>
+                    </tr>
+                    <tr>
+                        <td>Ubuntu Server</td>
+                        <td>24.04 LTS</td>
+                        <td><span class="badge badge-blue">Good</span></td>
+                        <td>Newer kernel (6.8), latest features, but less battle-tested</td>
+                    </tr>
+                    <tr>
+                        <td>Alpine Linux</td>
+                        <td>3.19+</td>
+                        <td><span class="badge badge-yellow">Advanced</span></td>
+                        <td>Ultra-minimal (~50MB), fastest boot, but requires expertise</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p style="margin-top: 15px; color: var(--text-secondary);"><strong>Avoid:</strong> CentOS/RHEL (older kernels), Windows (higher overhead), desktop variants (unnecessary packages).</p>
+        </div>
+
+        <!-- Step 3: Initial Security -->
+        <div class="card danger" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <span class="card-title"><span class="step-number">3</span>Security Hardening (CRITICAL)</span>
+                <span class="badge badge-red">Required</span>
+            </div>
+
+            <div class="insight-box danger">
+                <h4>Your VPS Will Be Scanned Within Minutes</h4>
+                <p>Bots continuously scan for vulnerable servers. Apply these security measures <strong>immediately</strong> after provisioning.</p>
+            </div>
+
+            <h4 style="margin: 20px 0 10px 0;">3a. SSH Key Authentication Only</h4>
+            <div class="code-block"><span class="comment"># On your LOCAL machine, generate SSH key if you don't have one:</span>
+ssh-keygen -t ed25519 -C "polybot-vps"
+
+<span class="comment"># Copy to server (replace YOUR_VPS_IP):</span>
+ssh-copy-id -i ~/.ssh/id_ed25519.pub root@YOUR_VPS_IP
+
+<span class="comment"># On the VPS, disable password authentication:</span>
+sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo systemctl restart sshd</div>
+
+            <h4 style="margin: 20px 0 10px 0;">3b. Firewall Configuration</h4>
+            <div class="code-block"><span class="comment"># Install and configure UFW firewall:</span>
+sudo apt update && sudo apt install -y ufw
+
+<span class="comment"># Allow only SSH and the dashboard port:</span>
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow ssh
+sudo ufw allow 8765/tcp  <span class="comment"># Dashboard port</span>
+sudo ufw --force enable
+
+<span class="comment"># Verify:</span>
+sudo ufw status</div>
+
+            <h4 style="margin: 20px 0 10px 0;">3c. Fail2ban (Brute Force Protection)</h4>
+            <div class="code-block"><span class="comment"># Install and enable fail2ban:</span>
+sudo apt install -y fail2ban
+sudo systemctl enable fail2ban
+sudo systemctl start fail2ban
+
+<span class="comment"># Default config bans IPs after 5 failed SSH attempts</span></div>
+
+            <h4 style="margin: 20px 0 10px 0;">3d. Create Non-Root User</h4>
+            <div class="code-block"><span class="comment"># Create a dedicated user for running the bot:</span>
+sudo adduser --disabled-password --gecos "" polybot
+sudo usermod -aG sudo polybot
+
+<span class="comment"># Copy SSH keys to new user:</span>
+sudo mkdir -p /home/polybot/.ssh
+sudo cp ~/.ssh/authorized_keys /home/polybot/.ssh/
+sudo chown -R polybot:polybot /home/polybot/.ssh
+sudo chmod 700 /home/polybot/.ssh
+sudo chmod 600 /home/polybot/.ssh/authorized_keys
+
+<span class="comment"># Now login as polybot user instead of root</span></div>
+
+            <h4 style="margin: 20px 0 10px 0;">3e. Automatic Security Updates</h4>
+            <div class="code-block"><span class="comment"># Enable unattended security updates:</span>
+sudo apt install -y unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades</div>
+        </div>
+
+        <!-- Step 4: Network Optimization -->
+        <div class="card" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <span class="card-title"><span class="step-number">4</span>Network & Kernel Optimization</span>
+                <span class="impact-rating impact-high">HIGH: -5-15ms</span>
+            </div>
+
+            <p style="margin-bottom: 15px;">These TCP tuning parameters significantly reduce latency and improve throughput. Apply all of them.</p>
+
+            <div class="code-block"><span class="comment"># Create optimized network config:</span>
+sudo tee /etc/sysctl.d/99-polybot-trading.conf &lt;&lt;'EOF'
+<span class="comment"># ===== TCP Buffer Sizes =====</span>
+<span class="comment"># Increase buffer sizes for high-throughput connections</span>
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.core.rmem_default = 1048576
+net.core.wmem_default = 1048576
+net.ipv4.tcp_rmem = 4096 1048576 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+
+<span class="comment"># ===== TCP Optimization =====</span>
+<span class="comment"># Reuse TIME_WAIT sockets for new connections</span>
+net.ipv4.tcp_tw_reuse = 1
+
+<span class="comment"># Enable TCP Fast Open (reduces connection setup by 1 RTT)</span>
+net.ipv4.tcp_fastopen = 3
+
+<span class="comment"># Increase connection backlog</span>
+net.core.somaxconn = 65535
+net.core.netdev_max_backlog = 65535
+
+<span class="comment"># ===== Congestion Control =====</span>
+<span class="comment"># Use BBR congestion control (better than cubic for trading)</span>
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+
+<span class="comment"># ===== Keepalive =====</span>
+<span class="comment"># Detect dead connections faster</span>
+net.ipv4.tcp_keepalive_time = 60
+net.ipv4.tcp_keepalive_intvl = 10
+net.ipv4.tcp_keepalive_probes = 6
+
+<span class="comment"># ===== Timestamps & SACK =====</span>
+<span class="comment"># Enable for better RTT estimation</span>
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_sack = 1
+
+<span class="comment"># ===== Memory =====</span>
+net.ipv4.tcp_max_syn_backlog = 65535
+net.ipv4.tcp_max_tw_buckets = 2000000
+EOF
+
+<span class="comment"># Apply immediately:</span>
+sudo sysctl -p /etc/sysctl.d/99-polybot-trading.conf
+
+<span class="comment"># Verify BBR is active:</span>
+sysctl net.ipv4.tcp_congestion_control</div>
+
+            <h4 style="margin: 20px 0 15px 0;">Impact of Each Setting:</h4>
+            <table class="opt-table">
+                <thead>
+                    <tr>
+                        <th>Setting</th>
+                        <th>Impact</th>
+                        <th>What It Does</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>tcp_congestion_control = bbr</code></td>
+                        <td><span class="impact-rating impact-high">HIGH</span></td>
+                        <td>Google's BBR algorithm optimizes throughput and reduces latency vs cubic</td>
+                    </tr>
+                    <tr>
+                        <td><code>tcp_fastopen = 3</code></td>
+                        <td><span class="impact-rating impact-high">HIGH</span></td>
+                        <td>Saves 1 round-trip on connection establishment (if server supports)</td>
+                    </tr>
+                    <tr>
+                        <td><code>tcp_tw_reuse = 1</code></td>
+                        <td><span class="impact-rating impact-medium">MEDIUM</span></td>
+                        <td>Reuse sockets in TIME_WAIT state, faster reconnection</td>
+                    </tr>
+                    <tr>
+                        <td><code>rmem/wmem max</code></td>
+                        <td><span class="impact-rating impact-medium">MEDIUM</span></td>
+                        <td>Larger buffers handle burst traffic without dropping</td>
+                    </tr>
+                    <tr>
+                        <td><code>tcp_keepalive_*</code></td>
+                        <td><span class="impact-rating impact-low">LOW</span></td>
+                        <td>Detect dead connections faster, cleaner reconnection</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Step 5: Install Bot -->
+        <div class="card" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <span class="card-title"><span class="step-number">5</span>Install PolymarketBot</span>
+            </div>
+
+            <h4 style="margin-bottom: 10px;">Option A: Docker (Recommended)</h4>
+            <div class="code-block"><span class="comment"># Install Docker:</span>
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker
+
+<span class="comment"># Deploy:</span>
+curl -fsSL https://raw.githubusercontent.com/yourusername/polymarketbot/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
+
+<span class="comment"># View logs:</span>
+docker compose logs -f</div>
+
+            <h4 style="margin: 20px 0 10px 0;">Option B: Native Python</h4>
+            <div class="code-block"><span class="comment"># Install Python and dependencies:</span>
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv git
+
+<span class="comment"># Clone and setup:</span>
+git clone https://github.com/yourusername/polymarketbot.git
+cd polymarketbot
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+<span class="comment"># Run:</span>
+python run_ghost_mode.py</div>
+
+            <h4 style="margin: 20px 0 10px 0;">Create Systemd Service (Auto-restart)</h4>
+            <div class="code-block"><span class="comment"># Create service file:</span>
+sudo tee /etc/systemd/system/polymarketbot.service &lt;&lt;EOF
+[Unit]
+Description=PolymarketBot Copy Trading
+After=network.target
+
+[Service]
+Type=simple
+User=polybot
+WorkingDirectory=/home/polybot/polymarketbot
+Environment=PORT=8765
+ExecStart=/home/polybot/polymarketbot/venv/bin/python run_ghost_mode.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+<span class="comment"># Enable and start:</span>
+sudo systemctl daemon-reload
+sudo systemctl enable polymarketbot
+sudo systemctl start polymarketbot
+
+<span class="comment"># Check status:</span>
+sudo systemctl status polymarketbot</div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- SECURITY: PROTECTING CREDENTIALS -->
+        <!-- ========================================== -->
+        <h2 class="section-title">Protecting Your Credentials</h2>
+
+        <div class="insight-box danger">
+            <h4>Never Expose Private Keys or Wallet Credentials</h4>
+            <p>If you enable live trading mode, your private keys could execute real trades. Follow these security practices.</p>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Environment Variables</span>
+                    <span class="badge badge-green">Recommended</span>
+                </div>
+                <p style="margin-bottom: 15px;">Store sensitive data in environment variables, not in code or config files.</p>
+                <div class="code-block"><span class="comment"># Create .env file (never commit to git!):</span>
+touch ~/.polybot.env
+chmod 600 ~/.polybot.env
+
+<span class="comment"># Add credentials:</span>
+echo 'POLYMARKET_API_KEY=your_api_key_here' >> ~/.polybot.env
+echo 'POLYMARKET_SECRET=your_secret_here' >> ~/.polybot.env
+echo 'WALLET_PRIVATE_KEY=your_private_key' >> ~/.polybot.env
+
+<span class="comment"># Load in systemd service:</span>
+<span class="comment"># Add to [Service] section:</span>
+EnvironmentFile=/home/polybot/.polybot.env</div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">File Permissions</span>
+                </div>
+                <ul class="tips-list">
+                    <li class="tip-lock">Config files: <code>chmod 600</code> (owner read/write only)</li>
+                    <li class="tip-lock">State files: <code>chmod 600</code> for ghost_state.json</li>
+                    <li class="tip-lock">Never run as root - use dedicated <code>polybot</code> user</li>
+                    <li class="tip-lock">Keep <code>.env</code> files outside the git repo</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card" style="margin-top: 20px;">
+            <div class="card-header">
+                <span class="card-title">What NOT to Expose</span>
+            </div>
+            <table class="opt-table">
+                <thead>
+                    <tr>
+                        <th>Data Type</th>
+                        <th>Risk Level</th>
+                        <th>Protection</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Private Keys / Seed Phrases</td>
+                        <td><span class="badge badge-red">CRITICAL</span></td>
+                        <td>Environment variables only, never in files</td>
+                    </tr>
+                    <tr>
+                        <td>API Keys / Secrets</td>
+                        <td><span class="badge badge-red">HIGH</span></td>
+                        <td>Environment variables, chmod 600 if in file</td>
+                    </tr>
+                    <tr>
+                        <td>Wallet Addresses (being copied)</td>
+                        <td><span class="badge badge-yellow">MEDIUM</span></td>
+                        <td>Public info, but avoid logging to shared systems</td>
+                    </tr>
+                    <tr>
+                        <td>Your VPS IP Address</td>
+                        <td><span class="badge badge-yellow">MEDIUM</span></td>
+                        <td>Don't share publicly, use Cloudflare if exposing dashboard</td>
+                    </tr>
+                    <tr>
+                        <td>Trade History / Positions</td>
+                        <td><span class="badge badge-blue">LOW</span></td>
+                        <td>Competitive intel, keep dashboard access restricted</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card" style="margin-top: 20px;">
+            <div class="card-header">
+                <span class="card-title">Dashboard Access Control</span>
+            </div>
+            <p style="margin-bottom: 15px;">The dashboard exposes your trading activity. Restrict access to trusted IPs only:</p>
+
+            <div class="code-block"><span class="comment"># Option 1: Firewall - Allow only your home IP:</span>
+sudo ufw delete allow 8765/tcp
+sudo ufw allow from YOUR_HOME_IP to any port 8765
+
+<span class="comment"># Option 2: SSH Tunnel (most secure):</span>
+<span class="comment"># Access dashboard via SSH tunnel, no public exposure</span>
+ssh -L 8765:localhost:8765 polybot@YOUR_VPS_IP
+<span class="comment"># Then open http://localhost:8765 in your browser</span>
+
+<span class="comment"># Option 3: Cloudflare Tunnel (if you need public access):</span>
+<span class="comment"># See: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/</span></div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- OPTIMIZATION IMPACT SUMMARY -->
+        <!-- ========================================== -->
+        <h2 class="section-title">Optimization Impact Summary</h2>
+        <p class="section-desc">Prioritized list of optimizations by latency impact. Focus on the top items first.</p>
+
+        <div class="card">
+            <table class="opt-table">
+                <thead>
+                    <tr>
+                        <th>Optimization</th>
+                        <th>Impact</th>
+                        <th>Effort</th>
+                        <th>Expected Improvement</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>VPS in Amsterdam</strong></td>
+                        <td><span class="impact-rating impact-critical">CRITICAL</span></td>
+                        <td>5 min</td>
+                        <td>-50 to -100ms (vs US/Asia)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Native IP (no proxy)</strong></td>
+                        <td><span class="impact-rating impact-critical">CRITICAL</span></td>
+                        <td>0 min</td>
+                        <td>-5 to -20ms (vs proxy)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>TCP BBR congestion control</strong></td>
+                        <td><span class="impact-rating impact-high">HIGH</span></td>
+                        <td>2 min</td>
+                        <td>-5 to -10ms, better consistency</td>
+                    </tr>
+                    <tr>
+                        <td><strong>TCP Fast Open</strong></td>
+                        <td><span class="impact-rating impact-high">HIGH</span></td>
+                        <td>1 min</td>
+                        <td>-3 to -5ms per new connection</td>
+                    </tr>
+                    <tr>
+                        <td><strong>WebSocket (vs polling)</strong></td>
+                        <td><span class="impact-rating impact-high">HIGH</span></td>
+                        <td>Built-in</td>
+                        <td>Real-time vs 1-5s delay</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Connection pooling</strong></td>
+                        <td><span class="impact-rating impact-medium">MEDIUM</span></td>
+                        <td>Built-in</td>
+                        <td>-10 to -50ms (eliminates handshakes)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Buffer size tuning</strong></td>
+                        <td><span class="impact-rating impact-medium">MEDIUM</span></td>
+                        <td>2 min</td>
+                        <td>Reduces packet loss under load</td>
+                    </tr>
+                    <tr>
+                        <td><strong>SSD/NVMe storage</strong></td>
+                        <td><span class="impact-rating impact-low">LOW</span></td>
+                        <td>Default</td>
+                        <td>Faster state persistence</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Minimal OS (Alpine)</strong></td>
+                        <td><span class="impact-rating impact-low">LOW</span></td>
+                        <td>30 min</td>
+                        <td>-1 to -2ms, smaller attack surface</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- LATENCY TIERS -->
+        <!-- ========================================== -->
+        <h2 class="section-title">Latency Standards for Copy Trading</h2>
+        <p class="section-desc">How to evaluate if your setup is competitive.</p>
+
+        <div class="latency-tiers">
+            <div class="tier-card tier-excellent">
+                <div class="tier-value latency-excellent">&lt;10ms</div>
+                <div class="tier-label">Excellent</div>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 8px;">HFT-grade. Top 1%.</p>
+            </div>
+            <div class="tier-card tier-good">
+                <div class="tier-value latency-good">10-50ms</div>
+                <div class="tier-label">Good</div>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 8px;">Reliable copy trading.</p>
+            </div>
+            <div class="tier-card tier-acceptable">
+                <div class="tier-value latency-ok">50-100ms</div>
+                <div class="tier-label">Acceptable</div>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 8px;">May miss fast trades.</p>
+            </div>
+            <div class="tier-card tier-poor">
+                <div class="tier-value latency-bad">&gt;100ms</div>
+                <div class="tier-label">Poor</div>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 8px;">Significant slippage.</p>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- VPS LOCATIONS -->
+        <!-- ========================================== -->
+        <h2 class="section-title">VPS Location Guide</h2>
+
+        <div class="vps-grid">
+            <div class="vps-card recommended">
+                <div class="vps-header">
+                    <div>
+                        <div class="vps-location">Amsterdam, Netherlands</div>
+                        <span class="badge badge-green" style="margin-top: 5px;">Primary Recommendation</span>
+                    </div>
+                    <div class="vps-latency latency-excellent">2-5ms</div>
+                </div>
+                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 15px;">
+                    ~370km from London via direct fiber. Legally accessible. AMS-IX is one of the world's largest internet exchanges.
+                </p>
+                <div class="provider-list">
+                    <div class="provider-item">
+                        <a href="https://hetzner.com/cloud" target="_blank">Hetzner Cloud</a>
+                        <span>&euro;4.15/mo</span>
+                        <span class="provider-notes">CPX11 - Best value</span>
+                    </div>
+                    <div class="provider-item">
+                        <a href="https://quantvps.com" target="_blank">QuantVPS</a>
+                        <span>$29/mo</span>
+                        <span class="provider-notes">Trading-optimized</span>
+                    </div>
+                    <div class="provider-item">
+                        <a href="https://vultr.com" target="_blank">Vultr</a>
+                        <span>$5/mo</span>
+                        <span class="provider-notes">Easy setup</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="vps-card">
+                <div class="vps-header">
+                    <div>
+                        <div class="vps-location">Frankfurt, Germany</div>
+                        <span class="badge badge-blue" style="margin-top: 5px;">Good Alternative</span>
+                    </div>
+                    <div class="vps-latency latency-good">8-12ms</div>
+                </div>
+                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 15px;">
+                    Major European hub. DE-CIX exchange. More provider options than Amsterdam.
+                </p>
+                <div class="provider-list">
+                    <div class="provider-item">
+                        <a href="https://hetzner.com" target="_blank">Hetzner</a>
+                        <span>&euro;4.15/mo</span>
+                        <span class="provider-notes">German HQ</span>
+                    </div>
+                    <div class="provider-item">
+                        <a href="https://contabo.com" target="_blank">Contabo</a>
+                        <span>&euro;5/mo</span>
+                        <span class="provider-notes">Budget</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="vps-card blocked">
+                <div class="vps-header">
+                    <div>
+                        <div class="vps-location">London, UK</div>
+                        <span class="badge badge-red" style="margin-top: 5px;">GEO-BLOCKED</span>
+                    </div>
+                    <div class="vps-latency" style="color: var(--text-secondary);">~1ms</div>
+                </div>
+                <div class="warning-box">
+                    <h4>Do Not Use</h4>
+                    <p>UK IPs are blocked by Polymarket due to regulatory restrictions.</p>
+                </div>
+            </div>
+
+            <div class="vps-card blocked">
+                <div class="vps-header">
+                    <div>
+                        <div class="vps-location">United States</div>
+                        <span class="badge badge-red" style="margin-top: 5px;">GEO-BLOCKED</span>
+                    </div>
+                    <div class="vps-latency" style="color: var(--text-secondary);">80-120ms</div>
+                </div>
+                <div class="warning-box">
+                    <h4>Do Not Use</h4>
+                    <p>US IPs are blocked. High latency anyway due to Atlantic crossing.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- PROXY (for geo-blocked users) -->
+        <!-- ========================================== -->
+        <h2 class="section-title">Proxy Configuration</h2>
+        <p class="section-desc">Only use if you cannot deploy on a VPS in an allowed region. Native VPS is always faster.</p>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Proxy Settings</span>
+                </div>
+                <div class="toggle-row">
+                    <span>Enable Proxy</span>
+                    <label class="toggle">
+                        <input type="checkbox" id="proxy-enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div id="proxy-settings" style="display: none;">
+                    <div class="form-group">
+                        <label>Proxy Type</label>
+                        <select id="proxy-type">
+                            <option value="socks5">SOCKS5 (Recommended)</option>
+                            <option value="socks5h">SOCKS5 (DNS on proxy)</option>
+                            <option value="http">HTTP</option>
+                            <option value="https">HTTPS</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Host</label>
+                        <input type="text" id="proxy-host" placeholder="proxy.example.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Port</label>
+                        <input type="number" id="proxy-port" placeholder="1080">
+                    </div>
+                    <div class="form-group">
+                        <label>Username (optional)</label>
+                        <input type="text" id="proxy-username" placeholder="username">
+                    </div>
+                    <div class="form-group">
+                        <label>Password (optional)</label>
+                        <input type="password" id="proxy-password" placeholder="password">
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="saveProxyConfig()">Save</button>
+                    <button class="btn btn-outline" onclick="testProxy()">Test</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Connection Tuning</span>
+                </div>
+                <div class="form-group">
+                    <label>Timeout (seconds)</label>
+                    <input type="number" id="timeout" value="5" step="0.5" min="1" max="30">
+                </div>
+                <div class="form-group">
+                    <label>Max Retries</label>
+                    <input type="number" id="max-retries" value="3" min="0" max="10">
+                </div>
+                <div class="form-group">
+                    <label>Connection Pool Size</label>
+                    <input type="number" id="pool-size" value="10" min="1" max="50">
+                </div>
+                <div class="toggle-row">
+                    <span>Keep-Alive</span>
+                    <label class="toggle">
+                        <input type="checkbox" id="keep-alive" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- BENCHMARK -->
+        <!-- ========================================== -->
+        <h2 class="section-title">Latency Benchmark</h2>
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Measure Your Connection</span>
+                <button class="btn btn-primary" onclick="runBenchmark()">Run Benchmark</button>
+            </div>
+            <div class="benchmark-results" style="margin-top: 15px;">
+                <div class="benchmark-row header">
+                    <span>Endpoint</span>
+                    <span>Avg</span>
+                    <span>Min</span>
+                    <span>P95</span>
+                    <span>Status</span>
+                </div>
+                <div id="benchmark-results">
+                    <p style="color: var(--text-secondary); padding: 20px 0;">Click "Run Benchmark" to measure latency.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- FINAL CHECKLIST -->
+        <!-- ========================================== -->
+        <h2 class="section-title">Final Setup Checklist</h2>
+        <div class="card">
+            <ul class="tips-list">
+                <li class="tip-check"><strong>VPS in Amsterdam</strong> (Hetzner, Vultr, or QuantVPS)</li>
+                <li class="tip-check"><strong>Ubuntu 22.04 LTS</strong> or Debian 12</li>
+                <li class="tip-lock"><strong>SSH keys only</strong> - disable password auth</li>
+                <li class="tip-lock"><strong>UFW firewall</strong> - allow only SSH + 8765</li>
+                <li class="tip-lock"><strong>Non-root user</strong> - never run as root</li>
+                <li class="tip-fire"><strong>TCP tuning applied</strong> - BBR, Fast Open, buffer sizes</li>
+                <li class="tip-check"><strong>Bot deployed</strong> via Docker or systemd</li>
+                <li class="tip-lock"><strong>Credentials in env vars</strong> - not in code</li>
+                <li class="tip-check"><strong>Benchmark run</strong> - verify &lt;10ms latency</li>
+                <li class="tip-money"><strong>Total cost: &euro;5-30/month</strong></li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('proxy-enabled').addEventListener('change', function() {
+            document.getElementById('proxy-settings').style.display = this.checked ? 'block' : 'none';
+        });
+
+        async function checkGeoStatus() {
+            const container = document.getElementById('geo-status');
+            container.innerHTML = '<div class="loading"></div><p>Checking...</p>';
+            try {
+                const resp = await fetch('/api/infrastructure/geo-check');
+                const data = await resp.json();
+                if (data.restricted) {
+                    container.innerHTML = `<div class="icon">&#128683;</div><h3 style="color: var(--accent-red);">Geo-Restricted</h3><p>IP: ${data.ip}</p><p>Country: ${data.country}</p>`;
+                } else if (data.restricted === false) {
+                    container.innerHTML = `<div class="icon">&#9989;</div><h3 style="color: #3fb950;">Access Allowed</h3><p>IP: ${data.ip}</p><p>Country: ${data.country}</p>`;
+                } else {
+                    container.innerHTML = `<div class="icon">&#9888;</div><h3 style="color: var(--accent-yellow);">Check Failed</h3><p>${data.message}</p>`;
+                }
+            } catch (e) {
+                container.innerHTML = `<div class="icon">&#10060;</div><h3 style="color: var(--accent-red);">Error</h3>`;
+            }
+        }
+
+        async function runBenchmark() {
+            const container = document.getElementById('benchmark-results');
+            container.innerHTML = '<p><span class="loading"></span> Running benchmark...</p>';
+            try {
+                const resp = await fetch('/api/infrastructure/benchmark', { method: 'POST' });
+                const data = await resp.json();
+                let html = '';
+                Object.entries(data).forEach(([name, r]) => {
+                    let cls = r.avg_ms < 10 ? 'latency-excellent' : r.avg_ms < 50 ? 'latency-good' : r.avg_ms < 100 ? 'latency-ok' : 'latency-bad';
+                    html += `<div class="benchmark-row"><span style="font-family: monospace;">${name}</span><span class="${cls}">${r.avg_ms}ms</span><span>${r.min_ms}ms</span><span>${r.p95_ms}ms</span><span class="badge ${r.success_rate > 90 ? 'badge-green' : 'badge-red'}">${r.success_rate}%</span></div>`;
+                });
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = '<p style="color: var(--accent-red);">Benchmark failed.</p>';
+            }
+        }
+
+        async function saveProxyConfig() {
+            const config = {
+                enabled: document.getElementById('proxy-enabled').checked,
+                proxy_type: document.getElementById('proxy-type').value,
+                host: document.getElementById('proxy-host').value,
+                port: parseInt(document.getElementById('proxy-port').value) || 0,
+                username: document.getElementById('proxy-username').value || null,
+                password: document.getElementById('proxy-password').value || null,
+                timeout_seconds: parseFloat(document.getElementById('timeout').value) || 5,
+                max_retries: parseInt(document.getElementById('max-retries').value) || 3,
+                pool_connections: parseInt(document.getElementById('pool-size').value) || 10,
+                keep_alive: document.getElementById('keep-alive').checked,
+            };
+            try {
+                const resp = await fetch('/api/infrastructure/proxy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
+                alert(resp.ok ? 'Saved!' : 'Failed to save');
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function testProxy() {
+            try {
+                const resp = await fetch('/api/infrastructure/proxy/test', { method: 'POST' });
+                const data = await resp.json();
+                alert(data.success ? `Success!\nLatency: ${data.latency_ms}ms\nGeo: ${data.geo_status}` : `Failed: ${data.error}`);
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function loadProxyConfig() {
+            try {
+                const resp = await fetch('/api/infrastructure/proxy');
+                const c = await resp.json();
+                document.getElementById('proxy-enabled').checked = c.enabled;
+                document.getElementById('proxy-settings').style.display = c.enabled ? 'block' : 'none';
+                document.getElementById('proxy-type').value = c.proxy_type || 'socks5';
+                document.getElementById('proxy-host').value = c.host || '';
+                document.getElementById('proxy-port').value = c.port || '';
+                document.getElementById('proxy-username').value = c.username || '';
+                document.getElementById('timeout').value = c.timeout_seconds || 5;
+                document.getElementById('max-retries').value = c.max_retries || 3;
+                document.getElementById('pool-size').value = c.pool_connections || 10;
+                document.getElementById('keep-alive').checked = c.keep_alive !== false;
+            } catch (e) {}
+        }
+
+        document.addEventListener('DOMContentLoaded', () => { checkGeoStatus(); loadProxyConfig(); });
+    </script>
+</body>
+</html>

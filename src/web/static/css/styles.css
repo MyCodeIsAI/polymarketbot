@@ -1,0 +1,367 @@
+/* PolymarketBot Dashboard Styles */
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1f2937;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #4b5563;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+}
+
+/* Status indicators */
+.status-running {
+    background-color: #10b981;
+    animation: pulse 2s infinite;
+}
+
+.status-stopped {
+    background-color: #ef4444;
+}
+
+.status-paused {
+    background-color: #f59e0b;
+    animation: pulse 2s infinite;
+}
+
+.status-error {
+    background-color: #ef4444;
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* Health status badges */
+.health-healthy {
+    background-color: #065f46;
+    color: #34d399;
+}
+
+.health-degraded {
+    background-color: #78350f;
+    color: #fbbf24;
+}
+
+.health-unhealthy {
+    background-color: #7f1d1d;
+    color: #f87171;
+}
+
+/* P&L colors */
+.pnl-positive {
+    color: #34d399;
+}
+
+.pnl-negative {
+    color: #f87171;
+}
+
+.pnl-neutral {
+    color: #9ca3af;
+}
+
+/* Trade side colors */
+.side-buy {
+    color: #34d399;
+}
+
+.side-sell {
+    color: #f87171;
+}
+
+/* Trade status */
+.trade-filled {
+    background-color: #065f46;
+    color: #34d399;
+}
+
+.trade-pending {
+    background-color: #78350f;
+    color: #fbbf24;
+}
+
+.trade-failed {
+    background-color: #7f1d1d;
+    color: #f87171;
+}
+
+.trade-partial {
+    background-color: #1e3a5f;
+    color: #60a5fa;
+}
+
+/* Position status */
+.position-synced {
+    background-color: #065f46;
+    color: #34d399;
+}
+
+.position-diverged {
+    background-color: #78350f;
+    color: #fbbf24;
+}
+
+.position-closed {
+    background-color: #374151;
+    color: #9ca3af;
+}
+
+/* Account cards */
+.account-card {
+    padding: 1rem 1.5rem;
+    transition: background-color 0.2s;
+}
+
+.account-card:hover {
+    background-color: #374151;
+}
+
+.account-enabled {
+    border-left: 3px solid #10b981;
+}
+
+.account-disabled {
+    border-left: 3px solid #6b7280;
+    opacity: 0.7;
+}
+
+/* Alert severity */
+.alert-critical {
+    border-left: 4px solid #ef4444;
+    background-color: rgba(239, 68, 68, 0.1);
+}
+
+.alert-warning {
+    border-left: 4px solid #f59e0b;
+    background-color: rgba(245, 158, 11, 0.1);
+}
+
+.alert-info {
+    border-left: 4px solid #3b82f6;
+    background-color: rgba(59, 130, 246, 0.1);
+}
+
+.alert-success {
+    border-left: 4px solid #10b981;
+    background-color: rgba(16, 185, 129, 0.1);
+}
+
+/* Toast notifications */
+.toast {
+    padding: 1rem 1.5rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    animation: slideIn 0.3s ease-out;
+    max-width: 400px;
+}
+
+.toast-success {
+    background-color: #065f46;
+    border: 1px solid #10b981;
+}
+
+.toast-error {
+    background-color: #7f1d1d;
+    border: 1px solid #ef4444;
+}
+
+.toast-warning {
+    background-color: #78350f;
+    border: 1px solid #f59e0b;
+}
+
+.toast-info {
+    background-color: #1e3a5f;
+    border: 1px solid #3b82f6;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+    }
+}
+
+/* Table styles */
+.bg-gray-750 {
+    background-color: #2d3748;
+}
+
+/* Modal backdrop */
+.modal-backdrop {
+    backdrop-filter: blur(4px);
+}
+
+/* Loading spinner */
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #4b5563;
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Connection status */
+.connection-connected {
+    background-color: #065f46;
+    color: #34d399;
+}
+
+.connection-disconnected {
+    background-color: #7f1d1d;
+    color: #f87171;
+}
+
+.connection-connecting {
+    background-color: #78350f;
+    color: #fbbf24;
+    animation: pulse 1s infinite;
+}
+
+/* Chart container */
+#pnl-chart {
+    max-height: 256px;
+}
+
+/* Wallet address truncation */
+.wallet-address {
+    font-family: monospace;
+    font-size: 0.75rem;
+}
+
+/* Button loading state */
+.btn-loading {
+    position: relative;
+    color: transparent;
+}
+
+.btn-loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    nav {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+}
+
+/* Data refresh animation */
+.data-updating {
+    animation: dataFlash 0.5s ease-out;
+}
+
+@keyframes dataFlash {
+    0% {
+        background-color: rgba(59, 130, 246, 0.3);
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
+/* Empty state styling */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem;
+    color: #6b7280;
+}
+
+.empty-state svg {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* Details/Summary accordion */
+details summary {
+    list-style: none;
+}
+
+details summary::-webkit-details-marker {
+    display: none;
+}
+
+details[open] summary svg {
+    transform: rotate(180deg);
+}
+
+details summary svg {
+    transition: transform 0.2s ease;
+}
+
+/* Settings modal styles */
+#settings-modal input:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+/* Blockchain status indicators */
+.blockchain-connected {
+    color: #34d399;
+}
+
+.blockchain-disconnected {
+    color: #9ca3af;
+}
+
+.blockchain-error {
+    color: #f87171;
+}

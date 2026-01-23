@@ -1,0 +1,11 @@
+[Unit]
+Description=PolymarketBot Health Check Timer
+Documentation=https://github.com/yourusername/polymarketbot
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
