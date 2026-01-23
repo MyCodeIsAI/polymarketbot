@@ -694,15 +694,18 @@ tail -f bot.log
 Create `/etc/systemd/system/polymarketbot.service`:
 ```ini
 [Unit]
-Description=PolymarketBot Copy Trading
+Description=PolymarketBot Copy Trading Dashboard
 After=network.target
 
 [Service]
 Type=simple
-User=yourusername
-WorkingDirectory=/home/yourusername/polymarketbot
-ExecStart=/home/yourusername/polymarketbot/venv/bin/python run_ghost_mode.py
+User=root
+WorkingDirectory=/root/polymarketbot
+Environment=PORT=8765
+ExecStart=/root/polymarketbot/venv/bin/python run_ghost_mode.py
 Restart=always
+RestartSec=5
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
@@ -710,10 +713,25 @@ WantedBy=multi-user.target
 
 Then:
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable polymarketbot
-sudo systemctl start polymarketbot
+systemctl daemon-reload
+systemctl enable polymarketbot
+systemctl start polymarketbot
+
+# Check status
+systemctl status polymarketbot
+
+# View logs
+journalctl -u polymarketbot -f
 ```
+
+**Important Security Note:** The dashboard binds to `localhost:8765` only. Access it securely via SSH tunnel:
+```bash
+# From your local machine:
+ssh -L 8765:localhost:8765 root@your-vps-ip
+
+# Then open http://localhost:8765 in your browser
+```
+This ensures the dashboard is never exposed to the public internet.
 
 ---
 

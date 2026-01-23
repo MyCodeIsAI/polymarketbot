@@ -886,7 +886,8 @@ async def run_dashboard(port: int = DEFAULT_PORT):
     print("-"*70 + "\n")
 
     # Run server
-    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
+    # Bind to localhost only for security - access via SSH tunnel
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
 
     try:

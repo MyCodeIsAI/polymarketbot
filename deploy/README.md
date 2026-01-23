@@ -1,186 +1,193 @@
-# PolymarketBot Deployment
+# PolymarketBot VPS Deployment
 
-This directory contains files for deploying PolymarketBot as a systemd service.
+This guide covers deploying PolymarketBot on a VPS (root account).
 
 ## Quick Start
 
-1. **Run the install script (as root):**
-   ```bash
-   sudo ./install.sh
-   ```
+### 1. Clone the Repository
 
-2. **Configure your credentials:**
-   ```bash
-   sudo nano /opt/polymarketbot/.env
-   ```
+```bash
+cd /root
+git clone https://github.com/yourusername/polymarketbot.git
+cd polymarketbot
+```
 
-3. **Configure target accounts:**
-   ```bash
-   sudo nano /opt/polymarketbot/config/accounts.yaml
-   ```
+### 2. Create Virtual Environment
 
-4. **Validate configuration:**
-   ```bash
-   sudo -u polybot /opt/polymarketbot/venv/bin/python -m src.cli validate
-   ```
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
-5. **Test API connectivity:**
-   ```bash
-   sudo -u polybot /opt/polymarketbot/venv/bin/python -m src.cli test-connection
-   ```
+### 3. Create Environment File
 
-6. **Start the service:**
-   ```bash
-   sudo systemctl start polymarketbot
-   sudo systemctl enable polymarketbot
-   ```
+```bash
+nano /root/polymarketbot/.env
+```
 
-## Files
+Add your Polygon RPC URL (required for blockchain monitoring):
+```
+POLYGON_RPC_URL=https://polygon-mainnet.g.alchemy.com/v2/YOUR_API_KEY
+```
 
-| File | Description |
-|------|-------------|
-| `polymarketbot.service` | Main systemd service file |
-| `polymarketbot-healthcheck.service` | Health check service |
-| `polymarketbot-healthcheck.timer` | Timer for periodic health checks |
-| `install.sh` | Installation script |
+### 4. Create systemd Service
 
-## Commands
+```bash
+cat > /etc/systemd/system/polymarketbot.service << 'EOF'
+[Unit]
+Description=PolymarketBot Copy Trading Dashboard
+After=network.target
 
-### Service Management
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/polymarketbot
+Environment=PORT=8765
+ExecStart=/root/polymarketbot/venv/bin/python run_ghost_mode.py
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+### 5. Start the Service
+
+```bash
+systemctl daemon-reload
+systemctl enable polymarketbot
+systemctl start polymarketbot
+
+# Verify it's running
+systemctl status polymarketbot
+```
+
+## Service Management
 
 ```bash
 # Start the bot
-sudo systemctl start polymarketbot
+systemctl start polymarketbot
 
 # Stop the bot
-sudo systemctl stop polymarketbot
+systemctl stop polymarketbot
 
 # Restart the bot
-sudo systemctl restart polymarketbot
+systemctl restart polymarketbot
 
 # Check status
-sudo systemctl status polymarketbot
+systemctl status polymarketbot
 
-# Enable on boot
-sudo systemctl enable polymarketbot
-
-# Disable on boot
-sudo systemctl disable polymarketbot
-```
-
-### Logs
-
-```bash
 # View live logs
 journalctl -u polymarketbot -f
 
 # View recent logs
 journalctl -u polymarketbot -n 100
-
-# View logs since today
-journalctl -u polymarketbot --since today
-
-# View logs with errors only
-journalctl -u polymarketbot -p err
-```
-
-### Health Checks
-
-```bash
-# Enable periodic health checks
-sudo systemctl enable --now polymarketbot-healthcheck.timer
-
-# Run manual health check
-sudo systemctl start polymarketbot-healthcheck
-
-# View health check status
-systemctl list-timers polymarketbot-healthcheck.timer
 ```
 
 ## Directory Structure
 
-After installation:
-
 ```
-/opt/polymarketbot/
-├── .env                 # Environment variables (secrets)
+/root/polymarketbot/
+├── .env                 # Environment variables (RPC URL, etc.)
 ├── venv/                # Python virtual environment
 ├── src/                 # Application source code
-├── config/              # Configuration files
-│   ├── accounts.yaml
-│   └── settings.yaml
-├── data/                # Database and state files
-│   └── polymarketbot.db
-├── logs/                # Log files (if file logging enabled)
-└── polybot.pid          # PID file when running
+├── ghost_state.json     # Persistent state (auto-generated)
+└── run_ghost_mode.py    # Main entry point
 ```
 
-## Security Notes
+## Security - SSH Tunnel Access
 
-- The `.env` file contains secrets and is readable only by the `polybot` user
-- The service runs with security hardening (NoNewPrivileges, ProtectSystem, etc.)
-- Resource limits prevent runaway memory/CPU usage
-- The service runs as a non-privileged user
+**CRITICAL:** The dashboard binds to `localhost:8765` and is NOT exposed to the internet.
+
+To access the dashboard securely:
+
+```bash
+# From your LOCAL machine, create an SSH tunnel:
+ssh -L 8765:localhost:8765 root@YOUR_VPS_IP
+
+# Then open in your browser:
+# http://localhost:8765
+```
+
+This ensures:
+- Dashboard is only accessible through your encrypted SSH connection
+- No one can access the UI without your VPS credentials
+- All traffic is encrypted end-to-end
+
+**Never expose port 8765 directly to the internet!**
 
 ## Troubleshooting
 
 ### Bot won't start
 
-1. Check configuration:
-   ```bash
-   sudo -u polybot /opt/polymarketbot/venv/bin/python -m src.cli validate
-   ```
-
-2. Check logs:
+1. Check logs:
    ```bash
    journalctl -u polymarketbot -n 50
    ```
 
-3. Test connectivity:
+2. Verify .env file exists with RPC URL:
    ```bash
-   sudo -u polybot /opt/polymarketbot/venv/bin/python -m src.cli test-connection
+   cat /root/polymarketbot/.env
    ```
 
-### VPN Issues
-
-If you see geo-blocking errors:
-
-1. Ensure VPN is connected
-2. Verify VPN exit node is in allowed region (Netherlands, Germany, etc.)
-3. Check that the VPN passes traffic for the polybot user
-
-### Database Issues
-
-If you see database errors:
-
-1. Check file permissions:
+3. Test manually:
    ```bash
-   ls -la /opt/polymarketbot/data/
+   cd /root/polymarketbot
+   source venv/bin/activate
+   python run_ghost_mode.py
    ```
 
-2. Try recreating the database:
-   ```bash
-   sudo -u polybot rm /opt/polymarketbot/data/polymarketbot.db
-   sudo systemctl restart polymarketbot
-   ```
+### "Too many open files" error
+
+Add file descriptor limits:
+```bash
+# In /etc/systemd/system/polymarketbot.service, ensure:
+LimitNOFILE=65535
+
+# Then reload:
+systemctl daemon-reload
+systemctl restart polymarketbot
+```
+
+### Geo-blocking Issues
+
+Ensure your VPS is in an allowed region (Amsterdam, Frankfurt, Dublin - NOT UK/US).
 
 ## Updating
 
-To update the bot:
-
 ```bash
 # Stop the service
-sudo systemctl stop polymarketbot
+systemctl stop polymarketbot
 
-# Backup current installation
-sudo cp -r /opt/polymarketbot /opt/polymarketbot.backup
-
-# Copy new files
-sudo cp -r ../src /opt/polymarketbot/
+# Pull latest code
+cd /root/polymarketbot
+git pull
 
 # Update dependencies
-sudo -u polybot /opt/polymarketbot/venv/bin/pip install -r requirements.txt
+source venv/bin/activate
+pip install -r requirements.txt
 
 # Start the service
-sudo systemctl start polymarketbot
+systemctl start polymarketbot
+```
+
+## Performance Tuning (Optional)
+
+For optimal latency, add TCP optimizations:
+
+```bash
+cat >> /etc/sysctl.conf << 'EOF'
+# Polymarketbot optimizations
+fs.file-max = 2097152
+net.core.somaxconn = 65535
+net.ipv4.tcp_fin_timeout = 10
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_keepalive_time = 60
+net.ipv4.tcp_low_latency = 1
+EOF
+
+sysctl -p
 ```

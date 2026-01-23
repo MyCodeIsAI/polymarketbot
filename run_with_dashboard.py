@@ -574,7 +574,8 @@ async def run_dashboard():
     trade_task = asyncio.create_task(generate_trades(manager))
 
     # Run the server
-    config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="warning")
+    # Bind to localhost only for security - access via SSH tunnel
+    config = uvicorn.Config(app, host="127.0.0.1", port=8000, log_level="warning")
     server = uvicorn.Server(config)
 
     try:
