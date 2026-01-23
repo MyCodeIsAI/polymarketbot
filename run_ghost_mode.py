@@ -541,20 +541,16 @@ async def run_dashboard(port: int = DEFAULT_PORT):
 
     @app.get("/api/positions")
     async def get_positions():
-        # In LIVE MODE: Fetch positions directly from Polymarket API
-        if ghost_state.is_live_mode and ghost_state.accounts:
-            all_positions = []
-            for account in ghost_state.accounts.values():
+        # In LIVE MODE: Fetch positions from OUR trading wallet
+        if ghost_state.is_live_mode and ghost_state.is_live_ready():
+            wallet = ghost_state.get_live_wallet_address()
+            if wallet:
                 try:
-                    live_positions = get_live_positions(account.wallet)
-                    for pos in live_positions:
-                        if pos.get("status") == "open" and pos.get("size", 0) > 0:
-                            pos["account_name"] = account.name
-                            pos["account_id"] = account.id
-                            all_positions.append(pos)
+                    live_positions = get_live_positions(wallet)
+                    return [pos for pos in live_positions if pos.get("size", 0) > 0]
                 except Exception as e:
-                    print(f"[Live Positions] Error fetching for {account.name}: {e}")
-            return all_positions
+                    print(f"[Live Positions] Error fetching for {wallet}: {e}")
+            return []
 
         # In GHOST MODE: Return simulated positions (filter out zero-size phantom entries)
         return [
@@ -573,20 +569,18 @@ async def run_dashboard(port: int = DEFAULT_PORT):
 
     @app.get("/api/positions/summary")
     async def get_positions_summary():
-        # In LIVE MODE: Fetch summary from Polymarket API
-        if ghost_state.is_live_mode and ghost_state.accounts:
-            total_count = 0
-            total_value = 0
-            total_unrealized_pnl = 0
-
-            for account in ghost_state.accounts.values():
-                try:
-                    portfolio = get_live_portfolio_value(account.wallet)
-                    total_count += portfolio.get("positions_count", 0)
-                    total_value += portfolio.get("total_value", 0)
-                    total_unrealized_pnl += portfolio.get("unrealized_pnl", 0)
-                except Exception as e:
-                    print(f"[Live Summary] Error fetching for {account.name}: {e}")
+        # In LIVE MODE: Fetch summary from OUR trading wallet
+        if ghost_state.is_live_mode and ghost_state.is_live_ready():
+            try:
+                live_portfolio = ghost_state.get_live_portfolio()
+                total_count = live_portfolio.get("positions_count", 0)
+                total_value = live_portfolio.get("total_value", 0)
+                total_unrealized_pnl = live_portfolio.get("unrealized_pnl", 0)
+            except Exception as e:
+                print(f"[Live Summary] Error fetching: {e}")
+                total_count = 0
+                total_value = 0
+                total_unrealized_pnl = 0
 
             return {
                 "count": total_count,
@@ -628,31 +622,29 @@ async def run_dashboard(port: int = DEFAULT_PORT):
 
     @app.get("/api/pnl")
     async def get_pnl():
-        # In LIVE MODE: Fetch P&L directly from Polymarket API
-        if ghost_state.is_live_mode and ghost_state.accounts:
-            total_realized_pnl = 0
-            total_unrealized_pnl = 0
-            total_invested = 0
-            total_value = 0
+        # In LIVE MODE: Fetch P&L from OUR trading wallet (not the targets)
+        if ghost_state.is_live_mode and ghost_state.is_live_ready():
+            try:
+                # Get our trading wallet's portfolio
+                live_portfolio = ghost_state.get_live_portfolio()
+                total_realized_pnl = live_portfolio.get("realized_pnl", 0)
+                total_unrealized_pnl = live_portfolio.get("unrealized_pnl", 0)
+                total_invested = live_portfolio.get("total_invested", 0)
+                total_value = live_portfolio.get("total_value", 0)
+                cash_balance = live_portfolio.get("balance", 0)
 
-            for account in ghost_state.accounts.values():
-                try:
-                    portfolio = get_live_portfolio_value(account.wallet)
-                    total_realized_pnl += portfolio.get("realized_pnl", 0)
-                    total_unrealized_pnl += portfolio.get("unrealized_pnl", 0)
-                    total_invested += portfolio.get("total_invested", 0)
-                    total_value += portfolio.get("total_value", 0)
-                except Exception as e:
-                    print(f"[Live P&L] Error fetching for {account.name}: {e}")
-
-            roi_percent = (total_realized_pnl + total_unrealized_pnl) / total_invested * 100 if total_invested > 0 else 0
-            return {
-                "realized_pnl": total_realized_pnl,
-                "unrealized_pnl": total_unrealized_pnl,
-                "total_invested": total_invested,
-                "total_value": total_value,
-                "roi_percent": roi_percent,
-            }
+                roi_percent = (total_realized_pnl + total_unrealized_pnl) / total_invested * 100 if total_invested > 0 else 0
+                return {
+                    "realized_pnl": total_realized_pnl,
+                    "unrealized_pnl": total_unrealized_pnl,
+                    "total_invested": total_invested,
+                    "total_value": total_value,
+                    "cash_balance": cash_balance,
+                    "roi_percent": roi_percent,
+                    "live_wallet": ghost_state.get_live_wallet_address(),
+                }
+            except Exception as e:
+                print(f"[Live P&L] Error fetching: {e}")
 
         # In GHOST MODE: Return simulated P&L
         return {
@@ -897,16 +889,16 @@ async def run_dashboard(port: int = DEFAULT_PORT):
                 elif data.get("command") == "subscribe":
                     await websocket.send_json({"type": "subscribed", "channel": data.get("channel")})
                 elif data.get("command") == "get_positions":
-                    # In LIVE MODE: Fetch positions from Polymarket API
-                    if ghost_state.is_live_mode and ghost_state.accounts:
+                    # In LIVE MODE: Fetch positions from OUR trading wallet
+                    if ghost_state.is_live_mode and ghost_state.is_live_ready():
+                        wallet = ghost_state.get_live_wallet_address()
                         all_positions = []
-                        for account in ghost_state.accounts.values():
+                        if wallet:
                             try:
-                                live_positions = get_live_positions(account.wallet)
-                                for pos in live_positions:
-                                    if pos.get("status") == "open" and pos.get("size", 0) > 0:
-                                        pos["account_name"] = account.name
-                                        all_positions.append(pos)
+                                all_positions = [
+                                    pos for pos in get_live_positions(wallet)
+                                    if pos.get("size", 0) > 0
+                                ]
                             except Exception:
                                 pass
                         await websocket.send_json({

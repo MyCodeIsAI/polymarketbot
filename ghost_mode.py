@@ -359,6 +359,38 @@ class GhostModeState:
         self.polygon_rpc_url = rpc_url
         print(f"  [Blockchain] RPC URL configured: {rpc_url[:40]}...")
 
+    def get_live_wallet_address(self) -> Optional[str]:
+        """Get our live trading wallet address."""
+        if self._auth and hasattr(self._auth, 'address'):
+            return self._auth.address
+        return None
+
+    def get_live_portfolio(self) -> dict:
+        """Fetch live portfolio data for our trading wallet from Polymarket API."""
+        wallet = self.get_live_wallet_address()
+        if not wallet:
+            return {"balance": 0, "total_value": 0, "realized_pnl": 0, "unrealized_pnl": 0}
+
+        try:
+            # Fetch portfolio value from Polymarket Data API
+            url = f"https://data-api.polymarket.com/value?user={wallet.lower()}"
+            resp = requests.get(url, timeout=10)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "balance": float(data.get("cashBalance", data.get("balance", 0))),
+                    "total_value": float(data.get("totalValue", data.get("total_value", 0))),
+                    "realized_pnl": float(data.get("realizedPnl", data.get("realized_pnl", 0))),
+                    "unrealized_pnl": float(data.get("unrealizedPnl", data.get("unrealized_pnl", 0))),
+                    "total_invested": float(data.get("totalInvested", data.get("total_invested", 0))),
+                    "positions_count": int(data.get("positionsCount", data.get("positions_count", 0))),
+                }
+        except Exception as e:
+            print(f"  [Live Portfolio] Error fetching: {e}")
+
+        return {"balance": 0, "total_value": 0, "realized_pnl": 0, "unrealized_pnl": 0}
+
     def get_status(self) -> dict:
         """Get current ghost mode status."""
         uptime = 0
@@ -370,9 +402,23 @@ class GhostModeState:
         true_lats = getattr(self, 'true_latencies', [])
         avg_true_latency = sum(true_lats[-100:]) / len(true_lats[-100:]) if true_lats else 0
 
+        # In LIVE MODE: Fetch real portfolio data from our trading wallet
+        if self.is_live_mode and self.is_live_ready():
+            live_portfolio = self.get_live_portfolio()
+            account_balance = live_portfolio.get("balance", 0) + live_portfolio.get("total_value", 0)
+            account_pnl = live_portfolio.get("realized_pnl", 0) + live_portfolio.get("unrealized_pnl", 0)
+            wallet_address = self.get_live_wallet_address()
+        else:
+            # GHOST MODE: Use simulated values
+            account_balance = float(self.simulated_balance)
+            account_pnl = float(self.simulated_pnl)
+            wallet_address = None
+
         return {
             "ghost_mode": self.enabled and not self.is_live_mode,
             "live_mode": self.is_live_mode,
+            "live_ready": self.is_live_ready(),
+            "live_wallet": wallet_address,
             "status": "running" if self.enabled else "stopped",
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "uptime": uptime,
@@ -387,8 +433,12 @@ class GhostModeState:
             "api_calls_simulated": self.api_calls_simulated,
             "positions_count": len(self.positions),
             "missed_trades_count": len(self.missed_trades),
-            "simulated_balance": float(self.simulated_balance),
-            "simulated_pnl": float(self.simulated_pnl),
+            # Account values - LIVE data when in live mode, simulated when in ghost mode
+            "account_balance": account_balance,
+            "account_pnl": account_pnl,
+            # Legacy fields for backwards compatibility (but now point to real data in live mode)
+            "simulated_balance": account_balance,
+            "simulated_pnl": account_pnl,
             "avg_detection_ms": round(avg_detection, 2),
             "avg_api_ms": round(avg_api, 2),
             "avg_true_latency_ms": round(avg_true_latency, 2),  # Time from trade to detection (the important one!)
