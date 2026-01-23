@@ -944,26 +944,17 @@ async def run_dashboard(port: int = DEFAULT_PORT):
     print(f"  No wallet connected - API calls will fail but timing is measured")
     print("\n  Press Ctrl+C to stop")
     print("\n" + "-"*70)
-    print("  Monitoring will auto-start when dashboard loads")
+    print("  Monitoring is OFF by default - start via dashboard or API")
     print("-"*70 + "\n")
 
-    # Auto-start ghost mode monitoring after a short delay
-    async def auto_start_monitoring():
-        await asyncio.sleep(2)  # Wait for server to be ready
-        await start_ghost_monitor()
-        print("  [Auto-Start] Ghost mode monitoring started!")
-
-    # Run server with auto-start
+    # Run server only - monitoring starts manually via dashboard
     # Bind to localhost only for security - access via SSH tunnel
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
 
     try:
-        # Start monitoring and server concurrently
-        await asyncio.gather(
-            auto_start_monitoring(),
-            server.serve(),
-        )
+        # Start server only - monitoring is started manually
+        await server.serve()
     except asyncio.CancelledError:
         pass
     finally:
