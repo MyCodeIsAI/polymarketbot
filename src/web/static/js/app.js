@@ -1085,23 +1085,25 @@ class PolymarketDashboard {
 
     async toggleGhostMode() {
         try {
-            const action = this.ghostModeEnabled ? 'stop' : 'start';
-            const result = await this.apiCall(`/ghost-mode/${action}`, 'POST');
-            this.ghostModeEnabled = !this.ghostModeEnabled;
+            // Toggle between ghost and live mode WITHOUT stopping the bot
+            const result = await this.apiCall('/mode/toggle', 'POST');
+
+            // Update state based on response
+            this.ghostModeEnabled = result.ghost_mode;
             this.updateGhostModeUI();
 
-            // Reload data after mode change
-            if (!this.ghostModeEnabled) {
-                // Clear local state when disabling ghost mode
+            // Clear simulated data when switching to live mode
+            if (result.live_mode) {
                 this.trades = [];
                 this.updateTrades([]);
-                this.updatePositions([]);
+                // Positions will be fetched from Polymarket API in live mode
             }
 
-            this.showToast('success', `Ghost Mode ${this.ghostModeEnabled ? 'enabled' : 'disabled'}`);
-            this.loadInitialData();  // Refresh everything
+            const modeName = result.live_mode ? 'Live' : 'Ghost';
+            this.showToast('success', `Switched to ${modeName} Mode`);
+            this.loadInitialData();  // Refresh everything with new mode's data
         } catch (error) {
-            this.showToast('error', `Failed to toggle Ghost Mode: ${error.message}`);
+            this.showToast('error', `Failed to toggle mode: ${error.message}`);
         }
     }
 

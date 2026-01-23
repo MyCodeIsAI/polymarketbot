@@ -689,18 +689,56 @@ async def run_dashboard(port: int = DEFAULT_PORT):
     @app.post("/api/control/{action}")
     async def control_bot(action: str):
         if action == "start":
+            # Start bot in current mode (ghost or live)
             await start_ghost_monitor()
-            return {"success": True, "action": action, "status": "running", "ghost_mode": True}
+            return {
+                "success": True,
+                "action": action,
+                "status": "running",
+                "ghost_mode": not ghost_state.is_live_mode,
+                "live_mode": ghost_state.is_live_mode
+            }
         elif action == "stop":
             await stop_ghost_monitor()
-            return {"success": True, "action": action, "status": "stopped", "ghost_mode": False}
+            return {"success": True, "action": action, "status": "stopped", "ghost_mode": False, "live_mode": False}
         elif action == "pause":
             await stop_ghost_monitor()
             return {"success": True, "action": action, "status": "paused"}
         elif action == "resume":
             await start_ghost_monitor()
-            return {"success": True, "action": action, "status": "running"}
+            return {
+                "success": True,
+                "action": action,
+                "status": "running",
+                "ghost_mode": not ghost_state.is_live_mode,
+                "live_mode": ghost_state.is_live_mode
+            }
         return {"success": False, "action": action}
+
+    @app.post("/api/mode/toggle")
+    async def toggle_mode():
+        """Toggle between ghost mode and live mode WITHOUT stopping the bot."""
+        was_live = ghost_state.is_live_mode
+        ghost_state.is_live_mode = not ghost_state.is_live_mode
+
+        mode_name = "Live" if ghost_state.is_live_mode else "Ghost"
+
+        await ws_manager.broadcast({
+            "type": "mode_changed",
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": {
+                "ghost_mode": not ghost_state.is_live_mode,
+                "live_mode": ghost_state.is_live_mode,
+                "message": f"Switched to {mode_name} Mode"
+            }
+        })
+
+        return {
+            "success": True,
+            "ghost_mode": not ghost_state.is_live_mode,
+            "live_mode": ghost_state.is_live_mode,
+            "message": f"Switched to {mode_name} Mode"
+        }
 
     # ==========================================================================
     # Infrastructure & Proxy APIs
