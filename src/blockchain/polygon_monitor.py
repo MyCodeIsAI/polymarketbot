@@ -201,7 +201,7 @@ class PolygonMonitor:
     async def _monitor_loop(self) -> None:
         """Main monitoring loop - polls for new blocks and events."""
 
-        poll_interval = 2.0  # Poll every 2 seconds (Polygon block time ~2s)
+        poll_interval = 1.0  # Poll every 1 second (catch blocks ASAP)
         rate_limit_backoff = 1.0  # Backoff time after rate limit
         max_blocks_per_batch = 5  # Max blocks to process per iteration (rate limit protection)
 
@@ -228,7 +228,7 @@ class PolygonMonitor:
                         self.blocks_processed += 1
                         # Small delay between blocks to avoid rate limits
                         if i < blocks_to_process - 1:
-                            await asyncio.sleep(0.2)
+                            await asyncio.sleep(0.05)
 
                     self.last_block = self.last_block + blocks_to_process
 

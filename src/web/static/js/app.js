@@ -440,6 +440,17 @@ class PolymarketDashboard {
             this.updateGhostModeUI();
         }
 
+        // Update blockchain panel from status data
+        if (data.blockchain_enabled !== undefined) {
+            this.updateBlockchainPanel({
+                enabled: data.blockchain_enabled,
+                trades_detected: data.blockchain_trades_detected || 0,
+                avg_latency_ms: data.blockchain_avg_latency_ms || 0,
+                last_block: data.blockchain_last_block,
+                blocks_processed: data.blockchain_blocks_processed,
+            });
+        }
+
         // Update control buttons
         this.updateControlButtons(status);
     }
