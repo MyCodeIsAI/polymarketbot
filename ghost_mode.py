@@ -711,6 +711,12 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
     )
     our_shares = our_size / price if price > 0 else Decimal(0)
 
+    # MINIMUM ORDER SIZE CHECK - Polymarket requires $1 minimum for ALL orders
+    MIN_ORDER_USD = Decimal("1.00")
+    if our_size < MIN_ORDER_USD:
+        print(f"  [SKIP] Order ${float(our_size):.2f} < $1 minimum - {market_name[:40]}")
+        return
+
     # Create ghost trade record
     ghost_trade = GhostTrade(
         id=f"ghost_{uuid.uuid4().hex[:8]}",
@@ -1130,9 +1136,36 @@ async def _handle_blockchain_trade(blockchain_trade: 'BlockchainTrade', ws_broad
         }
         print(f"  [BLOCKCHAIN] \033[32mENRICHED\033[0m price=${enriched['price']:.4f} size={enriched['size']:.2f}")
     else:
-        # Enrichment failed - skip (will be caught by API polling later)
-        print(f"  [BLOCKCHAIN] Enrichment failed - waiting for API polling")
-        return
+        # FALLBACK: API enrichment failed (trade not in API yet)
+        # Use orderbook price to execute immediately instead of waiting
+        orderbook_price = get_orderbook_price(blockchain_trade.token_id, blockchain_trade.side)
+
+        if orderbook_price and orderbook_price > 0:
+            # Use orderbook price with estimated size based on account settings
+            # We don't know exact target size, but we can use max_position_usd as estimate
+            estimated_usdc = min(account.max_position_usd, Decimal("50"))  # Cap at $50 for unknown trades
+
+            trade_data = {
+                'transactionHash': blockchain_trade.tx_hash,
+                'timestamp': int(blockchain_trade.timestamp.timestamp()),
+                'asset': blockchain_trade.token_id,
+                'conditionId': "",  # Unknown without API
+                'side': blockchain_trade.side,
+                'price': float(orderbook_price),
+                'size': float(estimated_usdc / orderbook_price),
+                'usdcSize': float(estimated_usdc),
+                'outcome': "",  # Unknown without API
+                'title': f"Fast trade (token: {blockchain_trade.token_id[:16]}...)",
+                '_blockchain_detected': True,
+                '_blockchain_latency_ms': blockchain_trade.detection_latency_ms,
+                '_enriched': False,
+                '_orderbook_fallback': True,
+            }
+            print(f"  [BLOCKCHAIN] \033[33mORDERBOOK FALLBACK\033[0m price={float(orderbook_price):.4f} (API not ready)")
+        else:
+            # No orderbook either - skip this trade
+            print(f"  [BLOCKCHAIN] Enrichment failed, no orderbook - skipping")
+            return
 
     # Mark as seen AFTER successful enrichment
     ghost_state._account_manager.add_seen_trade_hash(trade_hash)
