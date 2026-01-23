@@ -32,6 +32,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Load .env file BEFORE any imports that use environment variables
+from dotenv import load_dotenv
+load_dotenv(PROJECT_ROOT / ".env")
+
 # Default port (changed from 8000 to avoid conflicts)
 DEFAULT_PORT = int(os.environ.get("PORT", "8765"))
 
