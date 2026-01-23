@@ -882,18 +882,34 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
             from py_clob_client.client import ClobClient
             from py_clob_client.clob_types import OrderArgs, OrderType
 
+            # Determine signature type:
+            # 0 = EOA (direct wallet - signer IS the funder)
+            # 1 = POLY_PROXY (Polymarket proxy wallet - funder != signer)
+            # 2 = GNOSIS_SAFE
+            if ghost_state._funder_address and ghost_state._funder_address.lower() != ghost_state._auth.signer_address.lower():
+                signature_type = 1  # POLY_PROXY - using Polymarket's proxy wallet system
+            else:
+                signature_type = 0  # EOA - direct wallet
+
             # Initialize client with private key and funder (proxy wallet)
             client = ClobClient(
                 host="https://clob.polymarket.com",
                 key=ghost_state._private_key,
                 chain_id=137,  # Polygon mainnet
                 funder=ghost_state._funder_address,  # Proxy wallet that holds the funds
+                signature_type=signature_type,
             )
 
             # CRITICAL: Derive API credentials from private key
             # This is required for L2 authentication on order endpoints
             creds = client.create_or_derive_api_creds()
             client.set_api_creds(creds)
+
+            # Debug: Show what we're using
+            print(f"  [DEBUG] Signature type: {signature_type} ({'POLY_PROXY' if signature_type == 1 else 'EOA'})")
+            print(f"  [DEBUG] Signer: {ghost_state._auth.signer_address[:16]}...")
+            print(f"  [DEBUG] Funder: {ghost_state._funder_address[:16] if ghost_state._funder_address else 'None'}...")
+            print(f"  [DEBUG] API Key: {creds.api_key[:12] if hasattr(creds, 'api_key') else str(creds)[:20]}...")
 
             # Build order args
             order_args = OrderArgs(
