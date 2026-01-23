@@ -1145,7 +1145,8 @@ async def _handle_blockchain_trade(blockchain_trade: 'BlockchainTrade', ws_broad
         return
 
     # Create a unique hash for this trade
-    trade_hash = f"{blockchain_trade.tx_hash}_{blockchain_trade.timestamp.timestamp()}_{blockchain_trade.token_id}"
+    # Use int() on timestamp to match API polling hash format (prevents duplicate processing)
+    trade_hash = f"{blockchain_trade.tx_hash}_{int(blockchain_trade.timestamp.timestamp())}_{blockchain_trade.token_id}"
 
     # Check if we've already processed this trade via API polling
     if trade_hash in ghost_state.seen_trade_hashes:
