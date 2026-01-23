@@ -22,18 +22,23 @@ except ImportError:
     from web3.middleware import geth_poa_middleware as poa_middleware
 
 # Polymarket contract addresses on Polygon mainnet
-# CTF Exchange handles conditional token trading
+# CTF Exchange handles order matching
 CTF_EXCHANGE_ADDRESS = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
 
 # Neg Risk CTF Exchange (for negatively correlated markets)
 NEG_RISK_CTF_EXCHANGE_ADDRESS = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
 
-# Event signatures (keccak256 hashes)
-# OrderFilled(bytes32 orderHash, address maker, address taker, uint256 makerAssetId, uint256 takerAssetId, uint256 makerAmountFilled, uint256 takerAmountFilled, uint256 fee)
-ORDER_FILLED_TOPIC = "0xd0a08e8c493f9c94f29311604c9de1b4e8c8d4c06bd0c789af57f2d65b8e7c5d"
+# CTF Token contract - where actual token transfers happen
+# This is where we see user wallets in TransferSingle events
+CTF_TOKEN_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
 
-# OrdersMatched event for newer contracts
-ORDERS_MATCHED_TOPIC = "0x5af5e5a5c6e6c7e5f5a5e5a5c6e6c7e5f5a5e5a5c6e6c7e5f5a5e5a5c6e6c7e5"
+# Event signatures (keccak256 hashes)
+# TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)
+# This is the key event - user wallets appear in 'from' (topic[2]) and 'to' (topic[3])
+TRANSFER_SINGLE_TOPIC = "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"
+
+# OrderFilled - less reliable for wallet detection due to relayer system
+ORDER_FILLED_TOPIC = "0xd0a08e8c493f9c94f29311604c9de1b4e8c8d4c06bd0c789af57f2d65b8e7c5d"
 
 
 @dataclass
@@ -257,16 +262,17 @@ class PolygonMonitor:
             block = self._w3.eth.get_block(block_number)
             block_time = datetime.utcfromtimestamp(block['timestamp'])
 
-            # Query logs for CTF Exchange events
-            for contract_address in [CTF_EXCHANGE_ADDRESS, NEG_RISK_CTF_EXCHANGE_ADDRESS]:
-                logs = self._w3.eth.get_logs({
-                    'fromBlock': block_number,
-                    'toBlock': block_number,
-                    'address': Web3.to_checksum_address(contract_address),
-                })
+            # Query logs for CTF Token TransferSingle events
+            # This is where user wallet addresses appear (in from/to fields)
+            logs = self._w3.eth.get_logs({
+                'fromBlock': block_number,
+                'toBlock': block_number,
+                'address': Web3.to_checksum_address(CTF_TOKEN_ADDRESS),
+                'topics': [TRANSFER_SINGLE_TOPIC],  # Filter for TransferSingle events
+            })
 
-                for log in logs:
-                    await self._process_log(log, block_time, t_detect)
+            for log in logs:
+                await self._process_log(log, block_time, t_detect)
 
         except Exception as e:
             error_str = str(e).lower()
@@ -283,6 +289,9 @@ class PolygonMonitor:
         """
         Process a single event log.
 
+        Polymarket uses a relayer system - user addresses are in event logs, not tx from/to.
+        We parse the OrderFilled event to find maker/taker addresses.
+
         Args:
             log: The event log from Web3
             block_time: Timestamp of the block
@@ -297,24 +306,42 @@ class PolygonMonitor:
 
         # Limit seen set size
         if len(self._seen_txs) > 10000:
-            # Remove oldest entries (approximate)
             self._seen_txs = set(list(self._seen_txs)[-5000:])
 
         try:
-            # Get the full transaction to find the sender
-            tx = self._w3.eth.get_transaction(tx_hash)
-            sender = tx['from'].lower()
+            # Extract from/to addresses from TransferSingle event
+            # TransferSingle: topic[0]=sig, topic[1]=operator, topic[2]=from, topic[3]=to
+            topics = log.get('topics', [])
 
-            # Check if this is a wallet we're monitoring
-            if sender not in self.wallets:
-                # Also check 'to' address in case of proxy/delegate trades
-                to_addr = tx.get('to', '').lower() if tx.get('to') else ''
-                if to_addr not in self.wallets:
-                    return
-                sender = to_addr
+            trader_address = None
+            trade_side = None
+
+            if len(topics) >= 4:
+                # Extract from (topic[2]) and to (topic[3]) - they're padded to 32 bytes
+                from_raw = topics[2].hex() if hasattr(topics[2], 'hex') else str(topics[2])
+                to_raw = topics[3].hex() if hasattr(topics[3], 'hex') else str(topics[3])
+
+                # Convert from 32-byte padded to address (last 40 chars = 20 bytes)
+                from_addr = '0x' + from_raw[-40:].lower()
+                to_addr = '0x' + to_raw[-40:].lower()
+
+                # Check if from or to is a wallet we're monitoring
+                # from = seller (SELL), to = buyer (BUY)
+                if from_addr in self.wallets:
+                    trader_address = from_addr
+                    trade_side = "SELL"
+                elif to_addr in self.wallets:
+                    trader_address = to_addr
+                    trade_side = "BUY"
+
+            if not trader_address:
+                return  # No monitored wallet involved in this transfer
+
+            # Get transaction for additional context
+            tx = self._w3.eth.get_transaction(tx_hash)
 
             # Parse the trade details from the log
-            trade = await self._parse_trade_log(log, tx, sender, block_time, t_detect)
+            trade = await self._parse_trade_log(log, tx, trader_address, trade_side, block_time, t_detect)
 
             if trade:
                 self.trades_detected += 1
@@ -341,16 +368,18 @@ class PolygonMonitor:
         log: dict,
         tx: dict,
         sender: str,
+        trade_side: str,
         block_time: datetime,
         t_detect: float,
     ) -> Optional[BlockchainTrade]:
         """
-        Parse a trade from an event log.
+        Parse a trade from a TransferSingle event log.
 
         Args:
             log: Event log
             tx: Full transaction
             sender: Wallet address
+            trade_side: "BUY" or "SELL" (determined by from/to in event)
             block_time: Block timestamp
             t_detect: Detection start time
 
@@ -362,45 +391,30 @@ class PolygonMonitor:
             detection_latency_ms = (time.perf_counter() - t_detect) * 1000
             detection_latency_ms += (datetime.utcnow() - block_time).total_seconds() * 1000
 
-            # Parse log data
-            # The exact parsing depends on the event structure
-            # This is a simplified version - real implementation would decode ABI
-            topics = log.get('topics', [])
+            # Parse TransferSingle log data
+            # Data format: id (uint256, 32 bytes) + value (uint256, 32 bytes)
             data = log.get('data', '0x')
+            data_hex = data.hex() if hasattr(data, 'hex') else data
+            if data_hex.startswith('0x'):
+                data_hex = data_hex[2:]
 
-            # Extract token ID from topics (usually topic[1] or topic[2])
-            token_id = ""
-            if len(topics) > 1:
-                token_id = topics[1].hex() if hasattr(topics[1], 'hex') else str(topics[1])
+            # Extract token ID (first 32 bytes = 64 hex chars)
+            token_id = data_hex[:64] if len(data_hex) >= 64 else ""
 
-            # Parse amounts from data
-            # Data format: makerAmountFilled (32 bytes) + takerAmountFilled (32 bytes) + fee (32 bytes)
-            if len(data) >= 66:  # At least 32 bytes of data
-                data_hex = data.hex() if hasattr(data, 'hex') else data
-                if data_hex.startswith('0x'):
-                    data_hex = data_hex[2:]
-
-                # Extract amounts (simplified - actual ABI decoding would be more precise)
-                if len(data_hex) >= 64:
-                    maker_amount = int(data_hex[:64], 16) / 1e6  # USDC has 6 decimals
-                    taker_amount = int(data_hex[64:128], 16) / 1e18 if len(data_hex) >= 128 else 0
-                    fee = int(data_hex[128:192], 16) / 1e6 if len(data_hex) >= 192 else 0
-                else:
-                    maker_amount = 0
-                    taker_amount = 0
-                    fee = 0
+            # Extract value/size (second 32 bytes)
+            # CTF tokens typically have 18 decimals (like ETH)
+            if len(data_hex) >= 128:
+                value_raw = int(data_hex[64:128], 16)
+                size = Decimal(str(value_raw)) / Decimal("1000000")  # 6 decimals for CTF position tokens
             else:
-                maker_amount = 0
-                taker_amount = 0
-                fee = 0
+                size = Decimal("0")
 
-            # Determine side (simplified heuristic)
-            # In reality, you'd decode the full event to know maker vs taker
-            side = "BUY" if maker_amount > 0 else "SELL"
+            # Use the side determined from from/to addresses
+            side = trade_side
 
-            # Calculate price
-            size = Decimal(str(abs(taker_amount))) if taker_amount else Decimal("1")
-            price = Decimal(str(maker_amount)) / size if size > 0 else Decimal("0")
+            # Price estimation - we don't have exact price from TransferSingle
+            # Would need to correlate with order book or USDC transfer in same tx
+            price = Decimal("0")  # Price requires additional context
 
             return BlockchainTrade(
                 tx_hash=log['transactionHash'].hex(),
@@ -411,7 +425,7 @@ class PolygonMonitor:
                 side=side,
                 size=size,
                 price=price,
-                fee=Decimal(str(fee)),
+                fee=Decimal("0"),  # Fee not available in TransferSingle
                 detection_latency_ms=detection_latency_ms,
             )
 
