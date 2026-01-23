@@ -203,7 +203,7 @@ class LatencyBenchmark:
 # Polymarket endpoints for benchmarking
 POLYMARKET_ENDPOINTS = {
     "clob_api": "https://clob.polymarket.com/",
-    "data_api": "https://data-api.polymarket.com/markets?limit=1",
+    "data_api": "https://data-api.polymarket.com/activity?limit=1",  # Fixed: /markets returns 404
     "gamma_api": "https://gamma-api.polymarket.com/markets?limit=1",
     "geoblock": "https://polymarket.com/api/geoblock",
 }
