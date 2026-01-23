@@ -611,56 +611,48 @@ Supported proxy types: HTTP, HTTPS, SOCKS5, SOCKS5H (DNS on proxy)
 
 ---
 
-## One-Command Deployment
+## One-Command VPS Deployment
 
-Deploy to a fresh VPS with a single command:
-
-### Linux/Ubuntu (Recommended)
+Deploy to a fresh Ubuntu/Debian VPS with a single command:
 
 ```bash
-# Option 1: Direct script execution
-curl -fsSL https://raw.githubusercontent.com/yourusername/polymarketbot/main/deploy.sh | bash
-
-# Option 2: Clone and run
-git clone https://github.com/yourusername/polymarketbot.git
-cd polymarketbot
-chmod +x deploy.sh
-./deploy.sh
+curl -fsSL https://raw.githubusercontent.com/MyCodeIsAI/polymarketbot/main/deploy/install-vps.sh | bash
 ```
 
-### Docker (Easiest)
+**This automatically:**
+- Installs Python and all dependencies
+- Clones repository and creates virtual environment
+- Applies TCP/network optimizations for low-latency trading
+- Sets up file descriptor limits (fixes "too many files" error)
+- Creates systemd service with auto-restart on reboot
+- Binds dashboard to localhost only (security)
+
+### Accessing the Dashboard (SSH Tunnel)
+
+The dashboard is **NOT** exposed to the internet for security. Access via SSH tunnel:
 
 ```bash
-# Single container
-docker run -d --name polymarketbot -p 8765:8765 \
-  -v polybot-data:/app/data polymarketbot:latest
+# Step 1: From your LOCAL machine, create SSH tunnel:
+ssh -L 8765:localhost:8765 root@YOUR_VPS_IP
 
-# With Docker Compose (recommended)
-curl -fsSL https://raw.githubusercontent.com/yourusername/polymarketbot/main/docker-compose.yml -o docker-compose.yml
-docker compose up -d
-```
-
-### Windows
-
-```powershell
-# Clone repository
-git clone https://github.com/yourusername/polymarketbot.git
-cd polymarketbot
-
-# Run deployment script
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-.\deploy.ps1
+# Step 2: Open in your browser:
+# http://localhost:8765
 ```
 
 ### Post-Deployment
 
-After deployment:
+1. Add your Polygon RPC URL for faster trade detection (optional but recommended):
+   ```bash
+   nano /root/polymarketbot/.env
+   # Add: POLYGON_RPC_URL=wss://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY
+   systemctl restart polymarketbot
+   ```
 
-1. Open **http://your-server-ip:8765** in your browser
-2. Go to **Infrastructure** page to verify geo-access and latency
-3. Configure proxy if needed
-4. Add accounts to track
-5. Enable Ghost Mode to start monitoring
+2. Connect via SSH tunnel and open **http://localhost:8765**
+3. Add accounts to track
+4. Enable Ghost Mode to start monitoring
+
+See [deploy/README.md](deploy/README.md) for manual installation and troubleshooting
 
 ---
 
