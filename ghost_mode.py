@@ -496,7 +496,8 @@ class GhostModeState:
         # In LIVE MODE: Fetch real portfolio data from our trading wallet
         if self.is_live_mode and self.is_live_ready():
             live_portfolio = self.get_live_portfolio()
-            account_balance = live_portfolio.get("balance", 0) + live_portfolio.get("total_value", 0)
+            # total_value = usdc_balance + position_value (no double counting!)
+            account_balance = live_portfolio.get("total_value", 0)
             account_pnl = live_portfolio.get("realized_pnl", 0) + live_portfolio.get("unrealized_pnl", 0)
             wallet_address = self.get_live_wallet_address()
         else:
