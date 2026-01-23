@@ -760,12 +760,6 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
     )
     our_shares = our_size / price if price > 0 else Decimal(0)
 
-    # MINIMUM ORDER SIZE CHECK - Polymarket requires $1 minimum for ALL orders
-    MIN_ORDER_USD = Decimal("1.00")
-    if our_size < MIN_ORDER_USD:
-        print(f"  [SKIP] Order ${float(our_size):.2f} < $1 minimum - {market_name[:40]}")
-        return
-
     # Create ghost trade record
     ghost_trade = GhostTrade(
         id=f"ghost_{uuid.uuid4().hex[:8]}",
