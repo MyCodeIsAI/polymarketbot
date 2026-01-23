@@ -178,6 +178,9 @@ class GhostModeState:
         self._clob_client: Optional[CLOBClient] = None
         self._auth: Optional[PolymarketAuth] = None
         self._private_key: Optional[str] = os.environ.get("PRIVATE_KEY")
+        # Proxy/funder wallet address (where funds are held on Polymarket)
+        # This is different from the signer address derived from private key
+        self._funder_address: Optional[str] = os.environ.get("FUNDER_ADDRESS")
 
         # Add default account if none loaded
         if not self.accounts:
@@ -259,8 +262,14 @@ class GhostModeState:
             return False
 
         try:
-            self._auth = PolymarketAuth(private_key=self._private_key)
-            print(f"  [Live] Auth initialized for wallet: {self._auth.signer_address[:10]}...")
+            # Initialize auth with funder address if set (proxy wallet)
+            self._auth = PolymarketAuth(
+                private_key=self._private_key,
+                funder_address=self._funder_address,
+            )
+            signer = self._auth.signer_address[:10]
+            funder = self._funder_address[:10] if self._funder_address else signer
+            print(f"  [Live] Auth initialized - Signer: {signer}... Funder: {funder}...")
             return True
         except Exception as e:
             print(f"  [Live] Failed to initialize auth: {e}")
@@ -360,7 +369,11 @@ class GhostModeState:
         print(f"  [Blockchain] RPC URL configured: {rpc_url[:40]}...")
 
     def get_live_wallet_address(self) -> Optional[str]:
-        """Get our live trading wallet address."""
+        """Get our live trading wallet address (funder/proxy wallet for portfolio lookups)."""
+        # Use funder address if set (this is the proxy wallet where funds are held)
+        if self._funder_address:
+            return self._funder_address
+        # Fall back to signer address if no funder set
         if self._auth and hasattr(self._auth, 'signer_address'):
             return self._auth.signer_address
         return None
