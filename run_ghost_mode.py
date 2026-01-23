@@ -292,10 +292,26 @@ async def run_dashboard(port: int = DEFAULT_PORT):
     @app.post("/api/live-mode/start")
     async def api_start_live_mode():
         """Start live mode (requires wallet connection)."""
+        # Initialize live trading infrastructure first
+        live_ready = ghost_state.init_live_trading()
+        if not live_ready:
+            return {
+                "success": False,
+                "live_mode": False,
+                "ghost_mode": False,
+                "message": "Failed to initialize live trading (check PRIVATE_KEY env var)"
+            }
+
         ghost_state.is_live_mode = True
         ghost_state.clear_trading_state()  # Clear any ghost state
         await start_ghost_monitor()  # Same monitoring loop, different execution
-        return {"success": True, "live_mode": True, "ghost_mode": False, "message": "Live Mode started"}
+        return {
+            "success": True,
+            "live_mode": True,
+            "ghost_mode": False,
+            "live_ready": True,
+            "message": "Live Mode started - Live execution ENABLED"
+        }
 
     @app.post("/api/live-mode/stop")
     async def api_stop_live_mode():
@@ -722,6 +738,20 @@ async def run_dashboard(port: int = DEFAULT_PORT):
         ghost_state.is_live_mode = not ghost_state.is_live_mode
 
         mode_name = "Live" if ghost_state.is_live_mode else "Ghost"
+        live_ready = False
+
+        # If switching to live mode, initialize live trading infrastructure
+        if ghost_state.is_live_mode:
+            live_ready = ghost_state.init_live_trading()
+            if not live_ready:
+                # Failed to init, stay in ghost mode
+                ghost_state.is_live_mode = False
+                mode_name = "Ghost"
+                message = "Failed to initialize live trading (check PRIVATE_KEY)"
+            else:
+                message = f"Switched to {mode_name} Mode - Live execution ENABLED"
+        else:
+            message = f"Switched to {mode_name} Mode"
 
         await ws_manager.broadcast({
             "type": "mode_changed",
@@ -729,7 +759,8 @@ async def run_dashboard(port: int = DEFAULT_PORT):
             "data": {
                 "ghost_mode": not ghost_state.is_live_mode,
                 "live_mode": ghost_state.is_live_mode,
-                "message": f"Switched to {mode_name} Mode"
+                "live_ready": live_ready,
+                "message": message
             }
         })
 
@@ -737,7 +768,8 @@ async def run_dashboard(port: int = DEFAULT_PORT):
             "success": True,
             "ghost_mode": not ghost_state.is_live_mode,
             "live_mode": ghost_state.is_live_mode,
-            "message": f"Switched to {mode_name} Mode"
+            "live_ready": live_ready,
+            "message": message
         }
 
     # ==========================================================================

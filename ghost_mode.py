@@ -47,6 +47,16 @@ except ImportError:
     PolygonMonitor = None
     BlockchainTrade = None
 
+# Try to import live execution modules (optional - requires PRIVATE_KEY)
+try:
+    from src.api.clob import CLOBClient
+    from src.api.auth import PolymarketAuth
+    LIVE_EXECUTION_AVAILABLE = True
+except ImportError:
+    LIVE_EXECUTION_AVAILABLE = False
+    CLOBClient = None
+    PolymarketAuth = None
+
 # State persistence file (cross-platform)
 STATE_FILE = PROJECT_ROOT / "ghost_state.json"
 
@@ -164,6 +174,11 @@ class GhostModeState:
         # Last shutdown timestamp (for detecting missed trades)
         self.last_shutdown: Optional[datetime] = None
 
+        # Live trading infrastructure (initialized when entering live mode)
+        self._clob_client: Optional[CLOBClient] = None
+        self._auth: Optional[PolymarketAuth] = None
+        self._private_key: Optional[str] = os.environ.get("PRIVATE_KEY")
+
         # Add default account if none loaded
         if not self.accounts:
             self.add_account(
@@ -228,6 +243,36 @@ class GhostModeState:
         # to avoid duplicates after restart
 
         print("  [State] Trading state cleared (accounts preserved)")
+
+    def init_live_trading(self) -> bool:
+        """Initialize live trading infrastructure.
+
+        Returns:
+            True if initialization successful, False otherwise.
+        """
+        if not LIVE_EXECUTION_AVAILABLE:
+            print("  [Live] Execution modules not available")
+            return False
+
+        if not self._private_key:
+            print("  [Live] PRIVATE_KEY not set in environment")
+            return False
+
+        try:
+            self._auth = PolymarketAuth(private_key=self._private_key)
+            print(f"  [Live] Auth initialized for wallet: {self._auth.address[:10]}...")
+            return True
+        except Exception as e:
+            print(f"  [Live] Failed to initialize auth: {e}")
+            return False
+
+    def is_live_ready(self) -> bool:
+        """Check if live trading is ready."""
+        return (
+            LIVE_EXECUTION_AVAILABLE and
+            self._private_key is not None and
+            self._auth is not None
+        )
 
     async def check_missed_trades(self, ws_broadcast):
         """Check for trades that occurred while system was offline."""
@@ -654,53 +699,85 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
             print(f"  [MARKET SLIP] {slippage_pct_display:.1f}% > {max_pct_display:.0f}% max @ {float(price)*100:.1f}¢ - {market_name[:40]}")
             return
 
-    # GHOST EXECUTION - Build and attempt real API call
+    # EXECUTION - Live or Ghost mode
     t_api_start = time.perf_counter()
 
     # Store the order type from account settings
     ghost_trade.order_type = account.order_type
 
-    # Placeholder funder address - will cause clear rejection
-    GHOST_FUNDER_ADDRESS = "0x0000000000000000000000000000000000000000"
-
-    try:
-        # Build the FULL order that WOULD be sent in live mode
-        # This includes all parameters for proper audit trail
-        #
-        # NOTE: account.order_type (market/limit) is OUR execution preference:
-        #   - LIMIT: Only execute at target price or better (already filtered above)
-        #   - MARKET: Execute at current market price (with slippage tolerance)
-        #
-        # The CLOB order is always GTC at the execution price - we already
-        # decided whether to trade based on our market/limit preference.
-
-        order_params = {
-            "tokenID": trade.get('asset', ''),
-            "side": side,
-            "price": str(current_market_price),  # Use actual market price we're willing to pay
-            "size": str(our_shares),
-            "type": "GTC",  # Standard order type - our market/limit logic is handled above
-            "funderAddress": GHOST_FUNDER_ADDRESS,  # Fake address = guaranteed rejection
-            # Additional context for audit
-            "_audit": {
-                "our_order_mode": account.order_type,  # 'market' or 'limit' - OUR preference
-                "target_price": str(price),  # Price the trader we're copying got
-                "execution_price": str(current_market_price),  # Price we'd execute at
-                "slippage_pct": str(float(actual_slippage * 100)) if actual_slippage else "0",
-                "position_ratio": str(account.position_ratio),
-                "max_position_usd": str(account.max_position_usd),
-                "triggered_by": f"{account.name} trade",
-            }
+    # Build order params for audit trail
+    order_params = {
+        "tokenID": trade.get('asset', ''),
+        "side": side,
+        "price": str(current_market_price),
+        "size": str(our_shares),
+        "type": "GTC",
+        "_audit": {
+            "our_order_mode": account.order_type,
+            "target_price": str(price),
+            "execution_price": str(current_market_price),
+            "slippage_pct": str(float(actual_slippage * 100)) if actual_slippage else "0",
+            "position_ratio": str(account.position_ratio),
+            "max_position_usd": str(account.max_position_usd),
+            "triggered_by": f"{account.name} trade",
         }
+    }
+    ghost_trade.order_params = order_params
 
-        # Store full order params for audit
-        ghost_trade.order_params = order_params
-
-        # Try to actually call the CLOB API (will fail without auth, but shows timing)
-        api_url = "https://clob.polymarket.com/order"
-
-        # Make the real API call - this will fail but measures actual latency
+    # Check if we're in LIVE MODE with proper auth
+    if ghost_state.is_live_mode and ghost_state.is_live_ready():
+        # LIVE EXECUTION - Use real auth to place order
         try:
+            from py_clob_client.client import ClobClient
+            from py_clob_client.clob_types import OrderArgs, OrderType
+
+            # Initialize client with auth
+            client = ClobClient(
+                host="https://clob.polymarket.com",
+                key=ghost_state._private_key,
+                chain_id=137,  # Polygon mainnet
+            )
+
+            # Build order args
+            order_args = OrderArgs(
+                token_id=trade.get('asset', ''),
+                price=float(current_market_price),
+                size=float(our_shares),
+                side=side,
+            )
+
+            # Create and submit the order
+            signed_order = client.create_order(order_args)
+            result = client.post_order(signed_order, OrderType.GTC)
+
+            ghost_trade.api_response = {
+                "status": "submitted",
+                "order_id": result.get("orderID", "unknown"),
+                "body": str(result)[:500],
+            }
+            ghost_trade.api_error = None
+            ghost_trade.status = 'live_executed'
+
+            print(f"  \033[32m[LIVE ORDER]\033[0m {side} ${float(our_size):.2f} @ {float(current_market_price):.4f} - {market_name[:40]}")
+
+        except ImportError:
+            ghost_trade.api_error = "py_clob_client not installed"
+            ghost_trade.api_response = {"status": "error", "body": "Missing py_clob_client library"}
+            ghost_trade.status = 'live_error'
+            print(f"  \033[31m[LIVE ERROR]\033[0m py_clob_client not installed")
+        except Exception as e:
+            ghost_trade.api_error = f"Live execution error: {str(e)[:200]}"
+            ghost_trade.api_response = {"status": "error", "body": str(e)[:500]}
+            ghost_trade.status = 'live_error'
+            print(f"  \033[31m[LIVE ERROR]\033[0m {str(e)[:80]}")
+
+    else:
+        # GHOST EXECUTION - Simulate API call (will fail but shows timing)
+        GHOST_FUNDER_ADDRESS = "0x0000000000000000000000000000000000000000"
+        order_params["funderAddress"] = GHOST_FUNDER_ADDRESS
+
+        try:
+            api_url = "https://clob.polymarket.com/order"
             api_resp = requests.post(
                 api_url,
                 json=order_params,
@@ -723,15 +800,11 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
             ghost_trade.api_error = str(e)[:100]
             ghost_trade.api_response = {"status": "error", "body": str(e)[:200]}
 
-        ghost_state.api_calls_simulated += 1
+        ghost_trade.status = 'api_simulated'
 
-    except Exception as e:
-        ghost_trade.api_error = f"Build error: {str(e)[:100]}"
-        ghost_trade.order_params = {"error": str(e)}
-
+    ghost_state.api_calls_simulated += 1
     ghost_trade.api_call_ms = (time.perf_counter() - t_api_start) * 1000
     ghost_trade.total_ms = (time.perf_counter() - t_total_start) * 1000
-    ghost_trade.status = 'api_simulated'
 
     # Update simulated position
     pos_key = f"{market_id}:{outcome}"
