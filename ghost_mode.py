@@ -633,15 +633,20 @@ def get_orderbook_price(token_id: str, side: str) -> Optional[Decimal]:
 
     Returns None if orderbook is empty or API fails.
     """
-    if not token_id:
+    if not token_id or token_id == "unknown":
+        print(f"  [Orderbook] Invalid token_id: {token_id}")
         return None
 
     try:
         url = f"https://clob.polymarket.com/book?token_id={token_id}"
         resp = requests.get(url, timeout=3)
 
-        if resp.status_code != 200:
-            print(f"  [Orderbook] HTTP {resp.status_code} for {token_id[:16]}...")
+        if resp.status_code == 404:
+            # Market likely resolved/closed - this is expected for 15min crypto markets
+            print(f"  [Orderbook] Market closed (404) for token {token_id[:20]}...")
+            return None
+        elif resp.status_code != 200:
+            print(f"  [Orderbook] HTTP {resp.status_code} for {token_id[:20]}... (full: {token_id})")
             return None
 
         book = resp.json()

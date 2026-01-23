@@ -273,9 +273,11 @@ async def run_dashboard(port: int = DEFAULT_PORT):
 
     @app.post("/api/ghost-mode/start")
     async def api_start_ghost_mode():
-        ghost_state.is_live_mode = False
+        # GHOST MODE DISABLED - redirect to live mode
+        ghost_state.is_live_mode = True
+        ghost_state.init_live_trading()
         await start_ghost_monitor()
-        return {"success": True, "ghost_mode": True, "live_mode": False, "message": "Ghost Mode started"}
+        return {"success": True, "ghost_mode": False, "live_mode": True, "message": "LIVE Mode started (ghost mode disabled)"}
 
     @app.post("/api/ghost-mode/stop")
     async def api_stop_ghost_mode():
@@ -940,21 +942,37 @@ async def run_dashboard(port: int = DEFAULT_PORT):
         print(f"    - {acc.name}: {acc.wallet[:10]}...")
         print(f"      Keywords: {kw}")
         print(f"      Max Drawdown: {acc.max_drawdown_percent}%")
-    print(f"\n  Mode: GHOST MODE (Real monitoring, simulated execution)")
-    print(f"  No wallet connected - API calls will fail but timing is measured")
+    print(f"\n  Mode: LIVE MODE (Real monitoring, REAL execution)")
     print("\n  Press Ctrl+C to stop")
     print("\n" + "-"*70)
-    print("  Monitoring is OFF by default - start via dashboard or API")
+    print("  AUTO-STARTING LIVE MODE...")
     print("-"*70 + "\n")
 
-    # Run server only - monitoring starts manually via dashboard
     # Bind to localhost only for security - access via SSH tunnel
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
 
+    async def auto_start_live():
+        """Auto-start live mode after server is ready."""
+        await asyncio.sleep(2)  # Wait for server to be ready
+        # Initialize live trading and start monitoring
+        ghost_state.is_live_mode = True
+        live_ready = ghost_state.init_live_trading()
+        if live_ready:
+            print("  [LIVE] Live trading initialized successfully!")
+            await start_ghost_monitor()
+            print("  [LIVE] Monitoring STARTED - LIVE EXECUTION ENABLED")
+        else:
+            print("  [LIVE] WARNING: Failed to init live trading - check PRIVATE_KEY")
+            print("  [LIVE] Starting in monitoring-only mode...")
+            await start_ghost_monitor()
+
     try:
-        # Start server only - monitoring is started manually
-        await server.serve()
+        # Start server AND auto-start live mode
+        await asyncio.gather(
+            server.serve(),
+            auto_start_live(),
+        )
     except asyncio.CancelledError:
         pass
     finally:

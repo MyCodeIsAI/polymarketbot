@@ -399,7 +399,9 @@ class PolygonMonitor:
                 data_hex = data_hex[2:]
 
             # Extract token ID (first 32 bytes = 64 hex chars)
-            token_id = data_hex[:64] if len(data_hex) >= 64 else ""
+            # Convert from hex to decimal - Polymarket API expects decimal integer string
+            token_id_hex = data_hex[:64] if len(data_hex) >= 64 else ""
+            token_id = str(int(token_id_hex, 16)) if token_id_hex else ""
 
             # Extract value/size (second 32 bytes)
             # CTF tokens typically have 18 decimals (like ETH)
