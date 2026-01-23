@@ -260,7 +260,7 @@ class GhostModeState:
 
         try:
             self._auth = PolymarketAuth(private_key=self._private_key)
-            print(f"  [Live] Auth initialized for wallet: {self._auth.address[:10]}...")
+            print(f"  [Live] Auth initialized for wallet: {self._auth.signer_address[:10]}...")
             return True
         except Exception as e:
             print(f"  [Live] Failed to initialize auth: {e}")
@@ -361,8 +361,8 @@ class GhostModeState:
 
     def get_live_wallet_address(self) -> Optional[str]:
         """Get our live trading wallet address."""
-        if self._auth and hasattr(self._auth, 'address'):
-            return self._auth.address
+        if self._auth and hasattr(self._auth, 'signer_address'):
+            return self._auth.signer_address
         return None
 
     def get_live_portfolio(self) -> dict:
