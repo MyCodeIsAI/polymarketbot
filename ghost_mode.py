@@ -378,31 +378,109 @@ class GhostModeState:
             return self._auth.signer_address
         return None
 
+    def _get_onchain_usdc_balance(self, wallet: str) -> float:
+        """Fetch USDC balance directly from Polygon blockchain.
+
+        Args:
+            wallet: Ethereum wallet address
+
+        Returns:
+            USDC balance as float (already divided by 10^6 for decimals)
+        """
+        if not self.polygon_rpc_url:
+            return 0.0
+
+        try:
+            # USDC contract on Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+            # Method: balanceOf(address) = 0x70a08231
+            wallet_padded = wallet.lower().replace("0x", "").zfill(64)
+            data = f"0x70a08231{wallet_padded}"
+
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "eth_call",
+                "params": [{
+                    "to": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+                    "data": data
+                }, "latest"]
+            }
+
+            resp = requests.post(self.polygon_rpc_url, json=payload, timeout=5)
+            if resp.status_code == 200:
+                result = resp.json().get("result", "0x0")
+                balance_raw = int(result, 16) if result else 0
+                # USDC has 6 decimals
+                return balance_raw / 1_000_000
+        except Exception as e:
+            print(f"  [Blockchain] Error fetching USDC balance: {e}")
+
+        return 0.0
+
     def get_live_portfolio(self) -> dict:
-        """Fetch live portfolio data for our trading wallet from Polymarket API."""
+        """Fetch live portfolio data for our trading wallet.
+
+        Uses on-chain USDC balance (accurate) combined with Polymarket position data.
+        """
         wallet = self.get_live_wallet_address()
         if not wallet:
             return {"balance": 0, "total_value": 0, "realized_pnl": 0, "unrealized_pnl": 0}
 
+        # Get actual on-chain USDC balance (the REAL balance)
+        usdc_balance = self._get_onchain_usdc_balance(wallet)
+
+        # Also try Polymarket API for position data (may return 0 for fresh accounts)
+        position_value = 0.0
+        realized_pnl = 0.0
+        unrealized_pnl = 0.0
+        positions_count = 0
+
         try:
-            # Fetch portfolio value from Polymarket Data API
+            # Fetch positions from Polymarket Data API
+            url = f"https://data-api.polymarket.com/positions?user={wallet.lower()}"
+            resp = requests.get(url, timeout=10)
+
+            if resp.status_code == 200:
+                positions = resp.json()
+                positions_count = len(positions)
+
+                for pos in positions:
+                    size = float(pos.get("size", 0))
+                    current_price = float(pos.get("curPrice", pos.get("currentPrice", 0)))
+                    avg_price = float(pos.get("avgPrice", pos.get("averagePrice", 0)))
+
+                    # Position value = size * current price
+                    position_value += size * current_price
+
+                    # Unrealized P&L = (current_price - avg_price) * size
+                    if avg_price > 0:
+                        unrealized_pnl += (current_price - avg_price) * size
+        except Exception as e:
+            print(f"  [Live Portfolio] Error fetching positions: {e}")
+
+        # Try to get P&L data from value endpoint
+        try:
             url = f"https://data-api.polymarket.com/value?user={wallet.lower()}"
             resp = requests.get(url, timeout=10)
 
             if resp.status_code == 200:
                 data = resp.json()
-                return {
-                    "balance": float(data.get("cashBalance", data.get("balance", 0))),
-                    "total_value": float(data.get("totalValue", data.get("total_value", 0))),
-                    "realized_pnl": float(data.get("realizedPnl", data.get("realized_pnl", 0))),
-                    "unrealized_pnl": float(data.get("unrealizedPnl", data.get("unrealized_pnl", 0))),
-                    "total_invested": float(data.get("totalInvested", data.get("total_invested", 0))),
-                    "positions_count": int(data.get("positionsCount", data.get("positions_count", 0))),
-                }
-        except Exception as e:
-            print(f"  [Live Portfolio] Error fetching: {e}")
+                if isinstance(data, list) and data:
+                    data = data[0]  # Value endpoint returns array
+                realized_pnl = float(data.get("realizedPnl", data.get("realized_pnl", 0)))
+        except Exception:
+            pass
 
-        return {"balance": 0, "total_value": 0, "realized_pnl": 0, "unrealized_pnl": 0}
+        total_value = usdc_balance + position_value
+
+        return {
+            "balance": usdc_balance,  # On-chain USDC balance (accurate!)
+            "position_value": position_value,  # Value of open positions
+            "total_value": total_value,  # USDC + positions
+            "realized_pnl": realized_pnl,
+            "unrealized_pnl": unrealized_pnl,
+            "positions_count": positions_count,
+        }
 
     def get_status(self) -> dict:
         """Get current ghost mode status."""
