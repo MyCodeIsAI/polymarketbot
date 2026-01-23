@@ -174,6 +174,10 @@ class GhostModeState:
         # Last shutdown timestamp (for detecting missed trades)
         self.last_shutdown: Optional[datetime] = None
 
+        # Position cleanup tracking
+        self._last_position_cleanup: float = 0  # timestamp of last cleanup
+        self._position_cleanup_interval: float = 60  # run cleanup every 60 seconds
+
         # Live trading infrastructure (initialized when entering live mode)
         self._clob_client: Optional[CLOBClient] = None
         self._auth: Optional[PolymarketAuth] = None
@@ -246,6 +250,51 @@ class GhostModeState:
         # to avoid duplicates after restart
 
         print("  [State] Trading state cleared (accounts preserved)")
+
+    def cleanup_resolved_positions(self) -> int:
+        """
+        Remove positions for markets that have resolved/closed.
+
+        This is useful for short-term markets (like 15-min crypto) that
+        resolve quickly and would otherwise clutter the open positions view.
+
+        Returns:
+            Number of positions cleaned up
+        """
+        from src.utils.polymarket_api import is_market_resolved
+
+        # Check if it's time to run cleanup
+        current_time = time.time()
+        if current_time - self._last_position_cleanup < self._position_cleanup_interval:
+            return 0
+
+        self._last_position_cleanup = current_time
+        cleaned = 0
+        positions_to_remove = []
+
+        for pos_key, pos in self.positions.items():
+            # Skip already closed positions
+            if pos.get("status") != "open":
+                continue
+
+            # Get condition_id (market_id is actually condition_id in our storage)
+            condition_id = pos.get("market_id", "")
+
+            # Check if market is resolved
+            if condition_id and is_market_resolved(condition_id):
+                positions_to_remove.append(pos_key)
+                print(f"  [Cleanup] Resolved market: {pos.get('market_name', 'Unknown')[:40]}...")
+
+        # Remove resolved positions
+        for pos_key in positions_to_remove:
+            # Mark as closed rather than delete (preserves history)
+            self.positions[pos_key]["status"] = "resolved"
+            cleaned += 1
+
+        if cleaned > 0:
+            print(f"  [Cleanup] Removed {cleaned} resolved position(s) from open view")
+
+        return cleaned
 
     def init_live_trading(self) -> bool:
         """Initialize live trading infrastructure.
@@ -1275,6 +1324,9 @@ async def ghost_mode_monitor(ws_broadcast):
                     "health": {"status": "healthy", "health_score": 100},
                 },
             })
+
+            # Periodically cleanup resolved positions (15-min markets, etc.)
+            ghost_state.cleanup_resolved_positions()
 
             await asyncio.sleep(poll_interval)
 

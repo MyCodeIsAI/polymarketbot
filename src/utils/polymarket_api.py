@@ -284,3 +284,68 @@ def get_live_balance(wallet: str) -> float:
     except Exception as e:
         print(f"  [Live Balance Error] {wallet}: {e}")
         return 0
+
+
+def is_market_resolved(condition_id: str) -> Optional[bool]:
+    """
+    Check if a market has been resolved/closed.
+
+    Args:
+        condition_id: The market's condition ID
+
+    Returns:
+        True if resolved/closed, False if still active, None if couldn't determine
+    """
+    if not condition_id:
+        return None
+
+    try:
+        market_info = get_market_info(condition_id)
+        if not market_info:
+            return None
+
+        # Check various status indicators
+        # Polymarket uses different fields depending on API version
+        is_closed = market_info.get("closed", False)
+        is_resolved = market_info.get("resolved", False)
+        resolution_source = market_info.get("resolutionSource")
+        end_date = market_info.get("endDate") or market_info.get("end_date_iso")
+
+        # If explicitly marked as closed or resolved
+        if is_closed or is_resolved:
+            return True
+
+        # Check if end date has passed (for time-based markets like 15min crypto)
+        if end_date:
+            from datetime import datetime
+            try:
+                # Handle ISO format
+                if isinstance(end_date, str):
+                    end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                    if datetime.now(end_dt.tzinfo) > end_dt:
+                        return True
+            except Exception:
+                pass
+
+        return False
+
+    except Exception as e:
+        print(f"  [Market Resolution Check Error] {condition_id}: {e}")
+        return None
+
+
+def get_resolved_markets(condition_ids: list) -> list:
+    """
+    Check multiple markets and return list of resolved ones.
+
+    Args:
+        condition_ids: List of condition IDs to check
+
+    Returns:
+        List of condition_ids that are resolved/closed
+    """
+    resolved = []
+    for cid in condition_ids:
+        if cid and is_market_resolved(cid):
+            resolved.append(cid)
+    return resolved
