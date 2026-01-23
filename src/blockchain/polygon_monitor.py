@@ -115,6 +115,8 @@ class PolygonMonitor:
         self._running = False
         self._ws_task: Optional[asyncio.Task] = None
         self._reconnect_delay = 1.0
+        self._rate_limit_count = 0
+        self._use_polling_fallback = False
 
         # Statistics
         self.trades_detected = 0
@@ -198,6 +200,12 @@ class PolygonMonitor:
         """WebSocket subscription loop - receives events in real-time."""
 
         while self._running:
+            # Check if we should fall back to polling due to rate limits
+            if self._use_polling_fallback:
+                print(f"  [Blockchain] Rate limited - falling back to HTTP polling")
+                await self._polling_loop()
+                return
+
             try:
                 async with websockets.connect(
                     self.ws_url,
@@ -206,7 +214,8 @@ class PolygonMonitor:
                     close_timeout=5,
                 ) as ws:
                     print(f"  [Blockchain] WebSocket connected!")
-                    self._reconnect_delay = 1.0  # Reset backoff on successful connect
+                    self._reconnect_delay = 5.0  # Start with 5s delay
+                    self._rate_limit_count = 0  # Reset rate limit counter on success
 
                     # Subscribe to TransferSingle events on CTF Token contract
                     subscribe_msg = {
@@ -233,7 +242,7 @@ class PolygonMonitor:
                         print(f"  [Blockchain] Subscribed to logs (id: {sub_id[:16]}...)")
                     elif "error" in result:
                         print(f"  [Blockchain] Subscription error: {result['error']}")
-                        await asyncio.sleep(5)
+                        await asyncio.sleep(10)
                         continue
 
                     # Listen for events
@@ -259,13 +268,29 @@ class PolygonMonitor:
                             print(f"  [Blockchain] Event processing error: {e}")
 
             except websockets.exceptions.ConnectionClosed as e:
-                print(f"  [Blockchain] WebSocket closed: {e}, reconnecting...")
+                print(f"  [Blockchain] WebSocket closed: {e}, reconnecting in {self._reconnect_delay}s...")
             except Exception as e:
-                print(f"  [Blockchain] WebSocket error: {e}")
+                error_str = str(e)
+                # Check for rate limiting (HTTP 429)
+                if "429" in error_str:
+                    self._rate_limit_count += 1
+                    # Use much longer delay for rate limits
+                    rate_limit_delay = min(60 * self._rate_limit_count, 300)  # 60s, 120s, 180s... up to 5min
+                    print(f"  [Blockchain] Rate limited (429) - waiting {rate_limit_delay}s (attempt {self._rate_limit_count})")
 
-            if self._running:
+                    # After 5 rate limits, fall back to polling
+                    if self._rate_limit_count >= 5:
+                        print(f"  [Blockchain] Too many rate limits - switching to HTTP polling mode")
+                        self._use_polling_fallback = True
+
+                    await asyncio.sleep(rate_limit_delay)
+                    continue
+                else:
+                    print(f"  [Blockchain] WebSocket error: {e}")
+
+            if self._running and not self._use_polling_fallback:
                 await asyncio.sleep(self._reconnect_delay)
-                self._reconnect_delay = min(self._reconnect_delay * 1.5, 30)
+                self._reconnect_delay = min(self._reconnect_delay * 2, 60)  # Max 60s between retries
 
     async def _process_ws_log(self, log: dict, t_detect: float) -> None:
         """Process a log received via WebSocket subscription."""
@@ -390,7 +415,10 @@ class PolygonMonitor:
     async def _polling_loop(self) -> None:
         """Fallback HTTP polling loop (slower but more reliable)."""
 
-        poll_interval = 0.5  # Poll every 500ms for faster detection
+        poll_interval = 2.0  # Poll every 2s to avoid rate limits
+        rate_limit_delay = 30  # Start with 30s delay on rate limit
+
+        print(f"  [Blockchain] HTTP polling mode active (interval: {poll_interval}s)")
 
         while self._running:
             try:
@@ -409,6 +437,7 @@ class PolygonMonitor:
                         self.blocks_processed += 1
 
                     self.last_block = current_block
+                    rate_limit_delay = 30  # Reset on success
 
                 elapsed = time.perf_counter() - t_start
                 wait_time = max(0, poll_interval - elapsed)
@@ -416,9 +445,11 @@ class PolygonMonitor:
 
             except Exception as e:
                 if "429" in str(e):
-                    await asyncio.sleep(2)
+                    print(f"  [Blockchain] Rate limited in polling mode - waiting {rate_limit_delay}s")
+                    await asyncio.sleep(rate_limit_delay)
+                    rate_limit_delay = min(rate_limit_delay * 2, 300)  # Double up to 5 min max
                 else:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(5)
 
     async def _process_block(self, block_number: int) -> None:
         """Process a single block (for polling fallback)."""
