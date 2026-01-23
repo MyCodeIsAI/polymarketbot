@@ -196,7 +196,9 @@ class PolygonMonitor:
     async def _monitor_loop(self) -> None:
         """Main monitoring loop - polls for new blocks and events."""
 
-        poll_interval = 1.0  # Poll every 1 second (Polygon block time ~2s)
+        poll_interval = 2.0  # Poll every 2 seconds (Polygon block time ~2s)
+        rate_limit_backoff = 1.0  # Backoff time after rate limit
+        max_blocks_per_batch = 5  # Max blocks to process per iteration (rate limit protection)
 
         while self._running:
             try:
@@ -206,12 +208,24 @@ class PolygonMonitor:
                 current_block = self._w3.eth.block_number
 
                 if current_block > self.last_block:
-                    # Process new blocks
-                    for block_num in range(self.last_block + 1, current_block + 1):
+                    blocks_behind = current_block - self.last_block
+
+                    # If too far behind, skip ahead to avoid rate limits
+                    if blocks_behind > 50:
+                        print(f"  [Blockchain] {blocks_behind} blocks behind, skipping to recent")
+                        self.last_block = current_block - 10  # Only process last 10 blocks
+                        blocks_behind = 10
+
+                    # Process blocks with rate limiting
+                    blocks_to_process = min(blocks_behind, max_blocks_per_batch)
+                    for i, block_num in enumerate(range(self.last_block + 1, self.last_block + 1 + blocks_to_process)):
                         await self._process_block(block_num)
                         self.blocks_processed += 1
+                        # Small delay between blocks to avoid rate limits
+                        if i < blocks_to_process - 1:
+                            await asyncio.sleep(0.2)
 
-                    self.last_block = current_block
+                    self.last_block = self.last_block + blocks_to_process
 
                 # Calculate time to wait
                 elapsed = time.perf_counter() - t_start
@@ -219,8 +233,15 @@ class PolygonMonitor:
                 await asyncio.sleep(wait_time)
 
             except Exception as e:
-                print(f"  [Blockchain] Monitor error: {e}")
-                await asyncio.sleep(2.0)  # Wait before retry
+                error_str = str(e)
+                if "429" in error_str or "Too Many Requests" in error_str:
+                    print(f"  [Blockchain] Rate limited, backing off {rate_limit_backoff}s...")
+                    await asyncio.sleep(rate_limit_backoff)
+                    rate_limit_backoff = min(rate_limit_backoff * 2, 30)  # Exponential backoff, max 30s
+                else:
+                    print(f"  [Blockchain] Monitor error: {e}")
+                    await asyncio.sleep(2.0)  # Wait before retry
+                    rate_limit_backoff = 1.0  # Reset backoff on non-rate-limit errors
 
     async def _process_block(self, block_number: int) -> None:
         """
@@ -248,8 +269,14 @@ class PolygonMonitor:
                     await self._process_log(log, block_time, t_detect)
 
         except Exception as e:
-            # Don't spam logs for every block error
-            if "not found" not in str(e).lower():
+            error_str = str(e).lower()
+            # Don't spam logs for common errors
+            if "not found" in error_str:
+                pass  # Block not found yet, ignore
+            elif "429" in str(e) or "too many requests" in error_str:
+                # Rate limited - will be handled by monitor loop backoff
+                raise  # Re-raise to trigger backoff in monitor loop
+            else:
                 print(f"  [Blockchain] Block {block_number} error: {e}")
 
     async def _process_log(self, log: dict, block_time: datetime, t_detect: float) -> None:
