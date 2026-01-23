@@ -125,21 +125,40 @@ def get_live_positions(wallet: str) -> list:
             # Normalize field names for consistency with our internal format
             normalized = []
             for pos in positions:
+                size = float(pos.get("size", 0))
+                avg_price = float(pos.get("avgPrice", pos.get("average_price", 0)))
+                current_price = float(pos.get("curPrice", pos.get("current_price", avg_price)))
+
+                # Calculate current_value from size * price if not provided
+                api_current_value = pos.get("currentValue", pos.get("current_value"))
+                if api_current_value is not None:
+                    current_value = float(api_current_value)
+                else:
+                    current_value = size * current_price
+
+                # Calculate unrealized P&L if not provided
+                api_unrealized = pos.get("unrealizedPnl", pos.get("unrealized_pnl"))
+                if api_unrealized is not None:
+                    unrealized_pnl = float(api_unrealized)
+                else:
+                    initial_value = float(pos.get("initialValue", pos.get("initial_value", size * avg_price)))
+                    unrealized_pnl = current_value - initial_value
+
                 normalized.append({
                     "condition_id": pos.get("conditionId", pos.get("condition_id", "")),
                     "token_id": pos.get("assetId", pos.get("asset_id", pos.get("tokenId", ""))),
                     "outcome": pos.get("outcome", ""),
-                    "size": float(pos.get("size", 0)),
-                    "avg_price": float(pos.get("avgPrice", pos.get("average_price", 0))),
-                    "current_price": float(pos.get("curPrice", pos.get("current_price", pos.get("avgPrice", 0)))),
-                    "current_value": float(pos.get("currentValue", pos.get("current_value", 0))),
-                    "initial_value": float(pos.get("initialValue", pos.get("initial_value", 0))),
+                    "size": size,
+                    "avg_price": avg_price,
+                    "current_price": current_price,
+                    "current_value": current_value,
+                    "initial_value": float(pos.get("initialValue", pos.get("initial_value", size * avg_price))),
                     "realized_pnl": float(pos.get("realizedPnl", pos.get("realized_pnl", 0))),
-                    "unrealized_pnl": float(pos.get("unrealizedPnl", pos.get("unrealized_pnl", 0))),
-                    "cost_basis": float(pos.get("initialValue", pos.get("initial_value", 0))),
+                    "unrealized_pnl": unrealized_pnl,
+                    "cost_basis": float(pos.get("initialValue", pos.get("initial_value", size * avg_price))),
                     "market_slug": pos.get("marketSlug", pos.get("market_slug", "")),
                     "market_title": pos.get("title", pos.get("market_title", "")),
-                    "status": "open" if float(pos.get("size", 0)) > 0 else "closed",
+                    "status": "open" if size > 0 else "closed",
                 })
             return normalized
         return []
@@ -189,6 +208,56 @@ def get_live_portfolio_value(wallet: str) -> dict:
             "total_invested": 0,
             "positions_count": 0,
         }
+
+
+def enrich_trade_from_api(wallet: str, token_id: str, side: str) -> Optional[dict]:
+    """
+    Fetch trade details from API to enrich blockchain-detected trades.
+
+    Blockchain monitoring detects trades fast (~1s) but doesn't have price data.
+    This fetches the actual trade details from the API.
+
+    Args:
+        wallet: Trader's wallet address
+        token_id: The token/asset ID
+        side: BUY or SELL
+
+    Returns:
+        Trade data dict with price/size, or None if not found
+    """
+    try:
+        # Fetch recent activity for this wallet
+        url = f"https://data-api.polymarket.com/activity?user={wallet.lower()}&type=TRADE&limit=20"
+        resp = requests.get(url, timeout=5)
+
+        if resp.status_code != 200:
+            return None
+
+        trades = resp.json() or []
+
+        # Find the matching trade by token_id and side
+        for trade in trades:
+            trade_token = trade.get("asset", trade.get("assetId", ""))
+            trade_side = trade.get("side", "")
+
+            if trade_token == token_id and trade_side == side:
+                # Found the matching trade with full details
+                return {
+                    "price": float(trade.get("price", 0)),
+                    "size": float(trade.get("size", 0)),
+                    "usdcSize": float(trade.get("usdcSize", 0)),
+                    "conditionId": trade.get("conditionId", ""),
+                    "outcome": trade.get("outcome", ""),
+                    "title": trade.get("title", ""),
+                    "timestamp": trade.get("timestamp", 0),
+                    "transactionHash": trade.get("transactionHash", ""),
+                }
+
+        return None
+
+    except Exception as e:
+        print(f"  [Trade Enrichment Error] {wallet}: {e}")
+        return None
 
 
 def get_live_balance(wallet: str) -> float:

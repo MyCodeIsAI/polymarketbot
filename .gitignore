@@ -83,3 +83,7 @@ proxy_config.json     # May contain proxy credentials
 *secret*.json
 *private*.json
 *api_key*.txt
+# State files
+ghost_state.json
+data/user_prefs.json
+config/accounts.yaml

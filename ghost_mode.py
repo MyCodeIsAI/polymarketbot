@@ -1049,8 +1049,8 @@ async def _handle_blockchain_trade(blockchain_trade: 'BlockchainTrade', ws_broad
     """
     Handle a trade detected from blockchain monitoring.
 
-    This is called with ~2-5s latency (vs ~15-21s with API polling).
-    We convert the blockchain trade format to our internal format and process it.
+    This is called with ~1-2s latency (vs ~15-21s with API polling).
+    We immediately enrich with API data to get price, then execute.
     """
     if not BLOCKCHAIN_AVAILABLE or blockchain_trade is None:
         return
@@ -1069,36 +1069,52 @@ async def _handle_blockchain_trade(blockchain_trade: 'BlockchainTrade', ws_broad
         print(f"  [Blockchain] Trade from unknown wallet: {wallet_lower[:16]}...")
         return
 
-    # Convert blockchain trade to our internal format
-    # Note: We may not have full market info from blockchain, so we'll
-    # enrich it via API if needed
-    trade_data = {
-        'transactionHash': blockchain_trade.tx_hash,
-        'timestamp': int(blockchain_trade.timestamp.timestamp()),
-        'asset': blockchain_trade.token_id,
-        'side': blockchain_trade.side,
-        'price': float(blockchain_trade.price),
-        'size': float(blockchain_trade.size),
-        'usdcSize': float(blockchain_trade.size * blockchain_trade.price),
-        'title': f"Blockchain trade (token: {blockchain_trade.token_id[:16]}...)",
-        '_blockchain_detected': True,
-        '_blockchain_latency_ms': blockchain_trade.detection_latency_ms,
-    }
-
     # Create a unique hash for this trade
-    trade_hash = f"{blockchain_trade.tx_hash}_{trade_data['timestamp']}_{trade_data['asset']}"
+    trade_hash = f"{blockchain_trade.tx_hash}_{blockchain_trade.timestamp.timestamp()}_{blockchain_trade.token_id}"
 
     # Check if we've already processed this trade via API polling
     if trade_hash in ghost_state.seen_trade_hashes:
-        # Already processed, but log the latency improvement
-        print(f"  [Blockchain] Trade already seen via API (blockchain was {blockchain_trade.detection_latency_ms:.0f}ms faster)")
+        print(f"  [Blockchain] Trade already seen (blockchain was {blockchain_trade.detection_latency_ms:.0f}ms faster)")
         return
 
-    # Mark as seen
-    ghost_state._account_manager.add_seen_trade_hash(trade_hash)
-
     print(f"  [BLOCKCHAIN] \033[35mFAST DETECT\033[0m ({blockchain_trade.detection_latency_ms:.0f}ms) "
-          f"{blockchain_trade.side} from {account.name}")
+          f"{blockchain_trade.side} from {account.name} - enriching...")
+
+    # FAST PATH: Immediately fetch trade details from API to get price
+    # This adds ~200-500ms but gives us the price data we need
+    from src.utils.polymarket_api import enrich_trade_from_api
+
+    enriched = enrich_trade_from_api(
+        wallet=blockchain_trade.wallet,
+        token_id=blockchain_trade.token_id,
+        side=blockchain_trade.side,
+    )
+
+    if enriched and enriched.get("price", 0) > 0:
+        # Successfully enriched - use API data with blockchain speed
+        trade_data = {
+            'transactionHash': enriched.get("transactionHash", blockchain_trade.tx_hash),
+            'timestamp': enriched.get("timestamp", int(blockchain_trade.timestamp.timestamp())),
+            'asset': blockchain_trade.token_id,
+            'conditionId': enriched.get("conditionId", ""),
+            'side': blockchain_trade.side,
+            'price': enriched.get("price", 0),
+            'size': enriched.get("size", 0),
+            'usdcSize': enriched.get("usdcSize", 0),
+            'outcome': enriched.get("outcome", ""),
+            'title': enriched.get("title", f"Trade (token: {blockchain_trade.token_id[:16]}...)"),
+            '_blockchain_detected': True,
+            '_blockchain_latency_ms': blockchain_trade.detection_latency_ms,
+            '_enriched': True,
+        }
+        print(f"  [BLOCKCHAIN] \033[32mENRICHED\033[0m price=${enriched['price']:.4f} size={enriched['size']:.2f}")
+    else:
+        # Enrichment failed - skip (will be caught by API polling later)
+        print(f"  [BLOCKCHAIN] Enrichment failed - waiting for API polling")
+        return
+
+    # Mark as seen AFTER successful enrichment
+    ghost_state._account_manager.add_seen_trade_hash(trade_hash)
 
     # Broadcast blockchain detection event
     await ws_broadcast({
