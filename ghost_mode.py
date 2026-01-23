@@ -882,13 +882,18 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
             from py_clob_client.client import ClobClient
             from py_clob_client.clob_types import OrderArgs, OrderType
 
-            # Initialize client with auth AND funder address (proxy wallet)
+            # Initialize client with private key and funder (proxy wallet)
             client = ClobClient(
                 host="https://clob.polymarket.com",
                 key=ghost_state._private_key,
                 chain_id=137,  # Polygon mainnet
                 funder=ghost_state._funder_address,  # Proxy wallet that holds the funds
             )
+
+            # CRITICAL: Derive API credentials from private key
+            # This is required for L2 authentication on order endpoints
+            creds = client.create_or_derive_api_creds()
+            client.set_api_creds(creds)
 
             # Build order args
             order_args = OrderArgs(
