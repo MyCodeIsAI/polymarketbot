@@ -1270,6 +1270,7 @@ async def enrich_profile_views(
     }
 
 
+
 # =============================================================================
 # Preset Scan Runners
 # =============================================================================
@@ -2580,6 +2581,7 @@ async def categorize_accounts(request: CategorizeRequest):
                         user=wallet.lower(),
                         limit=request.sample_trades,
                     )
+
 
                 if not activities:
                     results[wallet] = {
