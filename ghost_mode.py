@@ -245,14 +245,8 @@ class GhostModeState:
         # Per-account P/L tracker (initialized when entering live mode)
         self._pnl_tracker: Optional[AccountPnLTracker] = None
 
-        # Add default account if none loaded
-        if not self.accounts:
-            self.add_account(
-                name="automatedaitradingbot",
-                wallet="0xd8f8c13644ea84d62e1ec88c5d1215e436eb0f11",
-                keywords=["temperature", "tempature", "weather", "celsius", "fahrenheit", "°f", "°c"],
-                max_drawdown_percent=Decimal("15"),
-            )
+        # Users configure their own copytrade accounts via the UI
+        # ghost_state.json is gitignored to preserve user settings across repo updates
 
     # Delegate account operations to AccountManager
     @property

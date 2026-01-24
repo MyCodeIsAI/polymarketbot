@@ -545,7 +545,7 @@
         <div class="nav-links">
             <a href="/">Dashboard</a>
             <a href="/discovery">Discovery</a>
-            <a href="/insider-scanner" class="active">Insider Scanner</a>
+            <a href="/scanner" class="active">Insider Scanner</a>
             <a href="/infrastructure">Infrastructure</a>
         </div>
     </nav>
@@ -966,6 +966,19 @@
         </div>
     </div>
 
+    <!-- Documented Insider Detail Modal -->
+    <div class="modal" id="insiderDetailModal">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h2>Documented Insider Details</h2>
+                <button class="modal-close" onclick="closeModal('insiderDetailModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="insiderDetailContent">
+                <div class="loading"><div class="spinner"></div>Loading...</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
@@ -1159,20 +1172,20 @@
                 }
 
                 tbody.innerHTML = insiders.map(i => `
-                    <tr>
+                    <tr style="cursor: pointer;" onclick="viewDocumentedInsider('${i.id}')">
                         <td><span class="flag-badge documented">${i.id}</span></td>
-                        <td class="wallet-address">
-                            ${i.wallet_address ? `<a href="https://polygonscan.com/address/${i.wallet_address}" target="_blank">${i.wallet_address.slice(0, 8)}...${i.wallet_address.slice(-6)}</a>` : '<span style="color: var(--text-secondary)">Unknown</span>'}
+                        <td class="wallet-address" onclick="event.stopPropagation()">
+                            ${i.wallet_address ? `<a href="https://polymarket.com/profile/${i.wallet_address}" target="_blank">${i.wallet_address.slice(0, 8)}...${i.wallet_address.slice(-6)}</a>` : '<span style="color: var(--text-secondary)">Unknown</span>'}
                         </td>
                         <td>${i.username || '-'}</td>
                         <td>${i.category || '-'}</td>
                         <td style="color: var(--accent)">${i.documented_profit_usd ? '$' + formatNumber(i.documented_profit_usd) : '-'}</td>
                         <td>${i.documented_win_rate ? (i.documented_win_rate * 100).toFixed(0) + '%' : '-'}</td>
                         <td>${(i.signals || []).slice(0, 3).join(', ') || '-'}</td>
-                        <td class="wallet-address">
-                            ${i.funding_info?.funding_source ? `<a href="https://polygonscan.com/address/${i.funding_info.funding_source}" target="_blank">${i.funding_info.funding_source.slice(0, 6)}...${i.funding_info.funding_source.slice(-4)}</a>` : '-'}
+                        <td class="wallet-address" onclick="event.stopPropagation()">
+                            ${i.funding_info?.source ? `<span style="color: var(--text-secondary)">${i.funding_info.source}</span>` : '-'}
                         </td>
-                        <td>
+                        <td onclick="event.stopPropagation()">
                             <div class="table-actions">
                                 <button onclick="viewDocumentedInsider('${i.id}')">View</button>
                             </div>
@@ -1301,8 +1314,120 @@
         }
 
         // View documented insider
-        function viewDocumentedInsider(insiderId) {
-            window.open(`${API_BASE}/documented-insiders/${insiderId}`, '_blank');
+        async function viewDocumentedInsider(insiderId) {
+            const content = document.getElementById('insiderDetailContent');
+            content.innerHTML = '<div class="loading"><div class="spinner"></div>Loading...</div>';
+            openModal('insiderDetailModal');
+
+            try {
+                const response = await fetch(`${API_BASE}/documented-insiders/${insiderId}`);
+                if (!response.ok) {
+                    content.innerHTML = '<div class="empty-state"><h3>Insider not found</h3></div>';
+                    return;
+                }
+
+                const i = await response.json();
+                const walletLink = i.wallet_address
+                    ? `<a href="https://polymarket.com/profile/${i.wallet_address}" target="_blank" style="color: var(--accent)">${i.wallet_address}</a>`
+                    : '<span style="color: var(--text-secondary)">Unknown</span>';
+
+                const signals = (i.signals || []).map(s => `<span class="flag-badge">${s}</span>`).join(' ');
+                const sources = (i.sources || []).map(s => `<a href="${s}" target="_blank" style="color: var(--accent); word-break: break-all;">${s}</a>`).join('<br>');
+                const notableTrades = (i.notable_trades || []).map(t => `
+                    <div style="background: var(--bg-card); padding: 10px; border-radius: 5px; margin-bottom: 8px;">
+                        <strong>${t.market || t.event || 'Trade'}</strong><br>
+                        ${t.date ? `<span style="color: var(--text-secondary)">Date: ${t.date}</span><br>` : ''}
+                        ${t.investment_usd ? `Investment: $${formatNumber(t.investment_usd)}<br>` : ''}
+                        ${t.profit_usd ? `<span style="color: var(--accent)">Profit: $${formatNumber(t.profit_usd)}</span><br>` : ''}
+                        ${t.entry_odds ? `Entry odds: ${(t.entry_odds * 100).toFixed(1)}%` : ''}
+                    </div>
+                `).join('');
+                const relatedWallets = (i.related_wallets || []).map(w => `<span class="flag-badge">${w}</span>`).join(' ');
+                const clusterWallets = i.cluster_wallets ? Object.entries(i.cluster_wallets).map(([name, addr]) =>
+                    `<div><strong>${name}:</strong> <a href="https://polymarket.com/profile/${addr}" target="_blank" style="color: var(--accent)">${addr.slice(0,10)}...</a></div>`
+                ).join('') : '';
+
+                content.innerHTML = `
+                    <div class="stats-grid" style="margin-bottom: 20px;">
+                        <div class="stat-card">
+                            <h3>ID / Username</h3>
+                            <div class="value" style="font-size: 1.2em;">${i.username || i.id}</div>
+                            ${i.current_username && i.current_username !== i.username ? `<div style="color: var(--text-secondary); font-size: 0.9em;">Now: ${i.current_username}</div>` : ''}
+                        </div>
+                        <div class="stat-card">
+                            <h3>Category</h3>
+                            <div class="value">${i.category || '-'}</div>
+                            ${i.subcategory ? `<div style="color: var(--text-secondary); font-size: 0.9em;">${i.subcategory}</div>` : ''}
+                        </div>
+                        <div class="stat-card">
+                            <h3>Documented Profit</h3>
+                            <div class="value accent">${i.documented_profit_usd ? '$' + formatNumber(i.documented_profit_usd) : '-'}</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Win Rate</h3>
+                            <div class="value">${i.documented_win_rate ? (i.documented_win_rate * 100).toFixed(0) + '%' : '-'}</div>
+                            <div style="color: var(--text-secondary); font-size: 0.9em;">${i.documented_trades || 0} trades</div>
+                        </div>
+                    </div>
+
+                    <div class="panel" style="margin-bottom: 15px;">
+                        <h3 style="margin-bottom: 10px;">Wallet Address</h3>
+                        ${walletLink}
+                        ${i.wallet_verified ? '<span style="color: var(--accent); margin-left: 10px;">✓ Verified</span>' : ''}
+                        ${i.is_cluster ? `<span style="color: var(--high); margin-left: 10px;">Cluster (${i.cluster_size} accounts)</span>` : ''}
+                    </div>
+
+                    ${signals ? `
+                    <div class="panel" style="margin-bottom: 15px;">
+                        <h3 style="margin-bottom: 10px;">Signals</h3>
+                        ${signals}
+                    </div>` : ''}
+
+                    ${i.note ? `
+                    <div class="panel" style="margin-bottom: 15px; border-left: 3px solid var(--high);">
+                        <h3 style="margin-bottom: 10px;">Note</h3>
+                        <p style="color: var(--text-secondary)">${i.note}</p>
+                    </div>` : ''}
+
+                    ${notableTrades ? `
+                    <div class="panel" style="margin-bottom: 15px;">
+                        <h3 style="margin-bottom: 10px;">Notable Trades</h3>
+                        ${notableTrades}
+                    </div>` : ''}
+
+                    ${clusterWallets ? `
+                    <div class="panel" style="margin-bottom: 15px;">
+                        <h3 style="margin-bottom: 10px;">Cluster Wallets</h3>
+                        ${clusterWallets}
+                    </div>` : ''}
+
+                    ${relatedWallets ? `
+                    <div class="panel" style="margin-bottom: 15px;">
+                        <h3 style="margin-bottom: 10px;">Related Wallets</h3>
+                        ${relatedWallets}
+                    </div>` : ''}
+
+                    ${i.characteristics ? `
+                    <div class="panel" style="margin-bottom: 15px;">
+                        <h3 style="margin-bottom: 10px;">Characteristics</h3>
+                        <pre style="background: var(--bg-primary); padding: 10px; border-radius: 5px; overflow-x: auto; font-size: 0.85em;">${JSON.stringify(i.characteristics, null, 2)}</pre>
+                    </div>` : ''}
+
+                    ${sources ? `
+                    <div class="panel" style="margin-bottom: 15px;">
+                        <h3 style="margin-bottom: 10px;">Sources</h3>
+                        ${sources}
+                    </div>` : ''}
+
+                    <div style="margin-top: 20px; display: flex; gap: 10px;">
+                        ${i.wallet_address ? `<a href="https://polymarket.com/profile/${i.wallet_address}" target="_blank" class="btn btn-primary">View on Polymarket</a>` : ''}
+                        ${i.wallet_address ? `<a href="https://polygonscan.com/address/${i.wallet_address}" target="_blank" class="btn btn-secondary">View on Polygonscan</a>` : ''}
+                        ${i.footprint_file ? `<button class="btn btn-secondary" onclick="alert('Footprint file: ${i.footprint_file}')">View Footprint</button>` : ''}
+                    </div>
+                `;
+            } catch (err) {
+                content.innerHTML = '<div class="empty-state"><h3>Failed to load insider details</h3></div>';
+            }
         }
 
         // Load high-volume sources
