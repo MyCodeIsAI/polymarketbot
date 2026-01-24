@@ -349,66 +349,78 @@
                 </div>
             </div>
 
-            <!-- Scan Buttons -->
-            <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-2">
-                    <p class="text-xs text-gray-500">Tip: Use "Load Pre-Analyzed" for instant access to 200+ accounts, or "Start Scan" for fresh analysis.</p>
-                    <!-- Hidden file input for loading saved scans -->
-                    <input type="file" id="load-saved-file" accept=".json" class="hidden">
-                </div>
-                <div class="flex space-x-3">
-                    <button id="cancel-scan-btn" class="hidden px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition">
-                        Cancel Scan
-                    </button>
-                    <!-- Save Results Button (hidden until results available) -->
-                    <button id="save-results-btn" class="hidden px-4 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition flex items-center">
-                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
-                        </svg>
-                        Save Results
-                    </button>
-                    <!-- Load Saved Button -->
-                    <button id="load-saved-btn" class="px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg transition flex items-center">
-                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                        </svg>
-                        Load Saved
-                    </button>
-                    <!-- Preset Scan Buttons -->
-                    <div class="flex space-x-2">
-                        <button id="run-mass-scan-btn" class="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg transition flex items-center" title="Run full mass scan to find profitable traders">
-                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                            </svg>
-                            <span class="btn-text">Mass Scan</span>
-                        </button>
-                        <button id="run-insider-probe-btn" class="px-4 py-3 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg transition flex items-center" title="Run insider probe to find suspicious accounts">
-                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                            </svg>
-                            <span class="btn-text">Insider Probe</span>
-                        </button>
-                    </div>
-                    <!-- Pre-Loaded Lists Dropdown -->
-                    <div class="relative">
-                        <select id="preloaded-list-select" class="appearance-none bg-gray-600 hover:bg-gray-500 text-white font-semibold rounded-lg px-4 py-3 pr-10 cursor-pointer transition">
-                            <option value="" disabled selected>Load List...</option>
-                            <option value="profitable">Profitable Traders (713)</option>
-                            <option value="insider">Insider Suspects (85)</option>
-                        </select>
-                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-white">
-                            <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
-                                <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/>
-                            </svg>
+            <!-- Hidden file input for loading saved scans -->
+            <input type="file" id="load-saved-file" accept=".json" class="hidden">
+
+            <!-- Action Buttons - Clean Grid Layout -->
+            <div class="flex flex-col gap-4">
+                <!-- Primary Actions Row -->
+                <div class="flex items-center justify-between gap-4">
+                    <!-- Left: Quick Load Options -->
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm text-gray-400 font-medium">Quick Load:</span>
+                        <div class="relative">
+                            <select id="preloaded-list-select" class="appearance-none bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg pl-4 pr-10 py-2.5 cursor-pointer transition border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none">
+                                <option value="" disabled selected>Select cached list...</option>
+                                <option value="profitable">Profitable Traders</option>
+                                <option value="insider">Insider Suspects</option>
+                            </select>
+                            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-400">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                </svg>
+                            </div>
                         </div>
+                        <button id="load-saved-btn" class="px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg transition flex items-center border border-gray-600">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                            </svg>
+                            Load File
+                        </button>
+                        <button id="save-results-btn" class="hidden px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition flex items-center">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
+                            </svg>
+                            Save
+                        </button>
                     </div>
-                    <button id="start-scan-btn" class="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition flex items-center text-lg">
-                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                        </svg>
-                        Start Fresh Scan
-                    </button>
+
+                    <!-- Right: Scan Actions -->
+                    <div class="flex items-center gap-3">
+                        <button id="cancel-scan-btn" class="hidden px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition">
+                            Cancel
+                        </button>
+                        <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-800 rounded-lg border border-gray-700">
+                            <span class="text-xs text-gray-400">Run Scan:</span>
+                            <button id="run-mass-scan-btn" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded transition flex items-center" title="Find profitable systematic traders">
+                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                                </svg>
+                                <span class="btn-text">Systematic</span>
+                            </button>
+                            <button id="run-insider-probe-btn" class="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-sm font-medium rounded transition flex items-center" title="Detect insider trading patterns">
+                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                                </svg>
+                                <span class="btn-text">Insider</span>
+                            </button>
+                        </div>
+                        <button id="start-scan-btn" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition flex items-center shadow-lg shadow-blue-600/20">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                            </svg>
+                            Custom Scan
+                        </button>
+                    </div>
                 </div>
+
+                <!-- Help Text -->
+                <p class="text-xs text-gray-500">
+                    <span class="text-gray-400">Quick Load</span> instantly loads cached results.
+                    <span class="text-gray-400">Systematic</span> finds profitable traders with consistent patterns.
+                    <span class="text-gray-400">Insider</span> detects suspicious trading behavior.
+                    <span class="text-gray-400">Custom Scan</span> uses the parameters above.
+                </p>
             </div>
 
             <!-- Scan Progress -->
@@ -892,16 +904,36 @@
                             <th class="pb-3 pl-2 font-medium w-8"></th>
                             <th class="pb-3 font-medium">Trader</th>
                             <th class="pb-3 font-medium">Category</th>
-                            <th class="pb-3 font-medium text-right">Score</th>
-                            <th class="pb-3 font-medium text-right">Total PnL</th>
-                            <th class="pb-3 font-medium text-right">Win%</th>
-                            <th class="pb-3 font-medium text-right">MaxDD</th>
-                            <th class="pb-3 font-medium text-right">PF</th>
-                            <th class="pb-3 font-medium text-right">Trades</th>
-                            <th class="pb-3 font-medium text-right">7d</th>
-                            <th class="pb-3 font-medium text-right">Mkts</th>
-                            <th class="pb-3 font-medium text-right">Last</th>
-                            <th class="pb-3 font-medium text-right">Views</th>
+                            <th class="pb-3 font-medium text-right sortable-header cursor-pointer hover:text-white transition" data-sort="systematic_score">
+                                <span class="inline-flex items-center justify-end">Score <span class="sort-icon ml-1"></span></span>
+                            </th>
+                            <th class="pb-3 font-medium text-right sortable-header cursor-pointer hover:text-white transition" data-sort="total_pnl">
+                                <span class="inline-flex items-center justify-end">Total PnL <span class="sort-icon ml-1"></span></span>
+                            </th>
+                            <th class="pb-3 font-medium text-right sortable-header cursor-pointer hover:text-white transition" data-sort="win_rate">
+                                <span class="inline-flex items-center justify-end">Win% <span class="sort-icon ml-1"></span></span>
+                            </th>
+                            <th class="pb-3 font-medium text-right sortable-header cursor-pointer hover:text-white transition" data-sort="max_drawdown_pct" data-sort-invert="true">
+                                <span class="inline-flex items-center justify-end">MaxDD <span class="sort-icon ml-1"></span></span>
+                            </th>
+                            <th class="pb-3 font-medium text-right sortable-header cursor-pointer hover:text-white transition" data-sort="profit_factor">
+                                <span class="inline-flex items-center justify-end">PF <span class="sort-icon ml-1"></span></span>
+                            </th>
+                            <th class="pb-3 font-medium text-right sortable-header cursor-pointer hover:text-white transition" data-sort="num_trades">
+                                <span class="inline-flex items-center justify-end">Trades <span class="sort-icon ml-1"></span></span>
+                            </th>
+                            <th class="pb-3 font-medium text-right sortable-header cursor-pointer hover:text-white transition" data-sort="trades_last_7d">
+                                <span class="inline-flex items-center justify-end">7d <span class="sort-icon ml-1"></span></span>
+                            </th>
+                            <th class="pb-3 font-medium text-right sortable-header cursor-pointer hover:text-white transition" data-sort="unique_markets">
+                                <span class="inline-flex items-center justify-end">Mkts <span class="sort-icon ml-1"></span></span>
+                            </th>
+                            <th class="pb-3 font-medium text-right sortable-header cursor-pointer hover:text-white transition" data-sort="activity_recency_days" data-sort-invert="true">
+                                <span class="inline-flex items-center justify-end">Last <span class="sort-icon ml-1"></span></span>
+                            </th>
+                            <th class="pb-3 font-medium text-right sortable-header cursor-pointer hover:text-white transition" data-sort="profile_views">
+                                <span class="inline-flex items-center justify-end">Views <span class="sort-icon ml-1"></span></span>
+                            </th>
                             <th class="pb-3 font-medium text-center">Actions</th>
                         </tr>
                     </thead>
@@ -928,13 +960,13 @@
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-semibold text-yellow-400 flex items-center">
                     <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                    Watchlist
+                    Watchlist (<span id="watchlist-count-panel">0</span>)
                 </h3>
                 <button id="close-watchlist-btn" class="text-gray-400 hover:text-white">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
-            <div id="watchlist-content" class="space-y-2">
+            <div id="watchlist-content" class="overflow-x-auto max-h-96 overflow-y-auto">
                 <p class="text-gray-400 text-sm">No accounts in watchlist yet. Click the star icon on any trader to add.</p>
             </div>
         </div>
@@ -952,7 +984,7 @@
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
-            <div id="dismissed-content" class="space-y-2 max-h-80 overflow-y-auto">
+            <div id="dismissed-content" class="overflow-x-auto max-h-96 overflow-y-auto">
                 <p class="text-gray-400 text-sm">No dismissed accounts. Click the X icon on any trader to dismiss.</p>
             </div>
         </div>
@@ -1282,14 +1314,17 @@
         // Lazy Categorization
         // =====================================================================
         async function lazyCategorizeAccounts(accounts) {
-            // Filter accounts that need categorization (no category_breakdown)
+            // Filter accounts that need categorization (no category_breakdown or placeholder category)
             const needsCategorization = accounts.filter(a => {
                 const wallet = (a.wallet_address || a.wallet || '').toLowerCase();
-                // Skip if already categorized or in cache
+                // Skip if already categorized and in cache
                 if (categoryCache[wallet]) return false;
+                // Skip if has valid category breakdown
                 if (a.category_breakdown && Object.keys(a.category_breakdown).length > 0) return false;
-                if (a.primary_category && a.primary_category !== 'Diversified' && a.primary_category !== 'Unknown') return false;
-                return true;
+                // Needs categorization if no category or placeholder category
+                const placeholderCategories = ['Diversified', 'Unknown', 'Other', 'other', ''];
+                if (!a.primary_category || placeholderCategories.includes(a.primary_category)) return true;
+                return false;
             });
 
             if (needsCategorization.length === 0 || categorizationInProgress) return;
@@ -1395,6 +1430,102 @@
                         drawdown_count: acc.drawdown_count || 0,
                         pl_curve_smoothness: acc.pl_curve_smoothness || 0,
                         _source: 'pre-analyzed'
+                    };
+                } else if ('insider_score' in acc) {
+                    // Insider probe format - has wallet_address and insider_score but no pl_metrics
+                    const accountAgeDays = acc.account_age_days || 30;
+                    const numTrades = acc.total_trades || 0;
+                    const winRate = acc.win_rate || 0;
+                    const resolvedBets = acc.resolved_bets || 0;
+
+                    // Estimate win/loss counts from resolved bets and win rate
+                    const winCount = resolvedBets > 0 ? Math.round(resolvedBets * winRate) : 0;
+                    const lossCount = resolvedBets - winCount;
+
+                    // Estimate trades per day and recent activity
+                    const tradesPerDay = accountAgeDays > 0 ? numTrades / accountAgeDays : 0;
+                    const tradesLast7d = acc.trades_in_last_24h !== undefined
+                        ? acc.trades_in_last_24h * 7
+                        : Math.min(numTrades, Math.round(tradesPerDay * Math.min(7, accountAgeDays)));
+                    const tradesLast30d = Math.min(numTrades, Math.round(tradesPerDay * Math.min(30, accountAgeDays)));
+
+                    // Estimate activity recency (if trades in last 24h > 0, they're active)
+                    let activityRecencyDays = accountAgeDays;
+                    if (acc.trades_in_last_24h > 0) activityRecencyDays = 0;
+                    else if (tradesLast7d > 0) activityRecencyDays = 3;
+                    else if (tradesLast30d > 0) activityRecencyDays = 15;
+
+                    // Position metrics from cumulative/largest position
+                    const maxPosition = acc.single_largest_position || acc.cumulative_position || 0;
+                    const avgPosition = numTrades > 0 ? (acc.cumulative_position || 0) / Math.max(1, acc.unique_markets || 1) : 0;
+
+                    // Estimate profit factor if we have enough data
+                    // For insider suspects, perfect win rate often means infinity (no losses)
+                    let profitFactor = 0;
+                    if (winRate >= 1.0 && resolvedBets > 0) {
+                        profitFactor = 999;  // Infinity placeholder
+                    } else if (lossCount > 0 && winCount > 0) {
+                        // Rough estimate: assume avg win = avg loss for simplicity
+                        profitFactor = winCount / Math.max(1, lossCount);
+                    }
+
+                    return {
+                        wallet: acc.wallet_address,
+                        wallet_address: acc.wallet_address,
+                        systematic_score: acc.insider_score || 0,  // Map insider_score to systematic_score
+                        total_pnl: parseFloat(acc.total_pnl) || 0,
+                        num_trades: numTrades,
+                        unique_markets: acc.unique_markets || 0,
+                        // Insider probe doesn't have drawdown data, estimate from priority
+                        max_drawdown_pct: 0,
+                        avg_drawdown_pct: 0,
+                        estimated_drawdown_pct: 0,
+                        win_rate: winRate,
+                        profit_factor: profitFactor,
+                        sharpe_ratio: 0,  // Not available in insider probe
+                        sortino_ratio: 0,
+                        // Account age fields
+                        account_age_days: accountAgeDays,
+                        activity_recency_days: activityRecencyDays,
+                        // Activity metrics
+                        trades_per_week: tradesPerDay * 7,
+                        trades_last_7d: tradesLast7d,
+                        trades_last_30d: tradesLast30d,
+                        // Position metrics
+                        avg_position_size: avgPosition,
+                        avg_position: avgPosition,
+                        max_position: maxPosition,
+                        median_position: avgPosition,
+                        pnl_per_trade: numTrades > 0 ? (parseFloat(acc.total_pnl) || 0) / numTrades : 0,
+                        // Win/loss metrics
+                        avg_win_size: 0,
+                        avg_loss_size: 0,
+                        profitable_trades: winCount,
+                        losing_trades: lossCount,
+                        resolved_bets: resolvedBets,
+                        gross_profit: 0,
+                        gross_loss: 0,
+                        // Buy/sell ratio
+                        buy_sell_ratio: 0.5,  // Not available
+                        // Category
+                        primary_category: acc.primary_category || 'Unknown',
+                        category_concentration: acc.category_concentration || 0,
+                        // Insider-specific fields
+                        insider_score: acc.insider_score || 0,
+                        priority: acc.priority || 'low',
+                        signals: acc.signals || [],
+                        signal_count: acc.signal_count || 0,
+                        dimensions_active: acc.dimensions_active || 0,
+                        dimension_scores: acc.dimension_scores || {},
+                        confidence_interval: acc.confidence_interval || [0, 0],
+                        avg_entry_odds: acc.avg_entry_odds || 0,
+                        has_hedging: acc.has_hedging || false,
+                        trades_in_last_24h: acc.trades_in_last_24h || 0,
+                        trades_in_off_hours: acc.trades_in_off_hours || 0,
+                        cumulative_position: acc.cumulative_position || 0,
+                        single_largest_position: acc.single_largest_position || 0,
+                        _source: 'insider-probe',
+                        _raw: acc  // Keep original for debugging
                     };
                 } else if (isScanResult) {
                     // Convert scan result format to pre-analyzed format
@@ -1756,6 +1887,48 @@
             }
         });
 
+        // Column header sorting
+        document.querySelectorAll('.sortable-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const sortField = header.dataset.sort;
+                const invertSort = header.dataset.sortInvert === 'true';
+
+                if (currentSort === sortField) {
+                    // Toggle direction
+                    sortDirection = sortDirection === 'desc' ? 'asc' : 'desc';
+                } else {
+                    // New sort field - default to desc (unless inverted like MaxDD/Last)
+                    currentSort = sortField;
+                    sortDirection = invertSort ? 'asc' : 'desc';
+                }
+
+                currentPage = 1;  // Reset to first page
+                updateSortIcons();
+                renderAnalyzedTable();
+            });
+        });
+
+        function updateSortIcons() {
+            document.querySelectorAll('.sortable-header').forEach(header => {
+                const sortField = header.dataset.sort;
+                const iconSpan = header.querySelector('.sort-icon');
+                if (!iconSpan) return;
+
+                if (sortField === currentSort) {
+                    header.classList.add('text-white');
+                    iconSpan.innerHTML = sortDirection === 'desc'
+                        ? '<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/></svg>'
+                        : '<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"/></svg>';
+                } else {
+                    header.classList.remove('text-white');
+                    iconSpan.innerHTML = '';
+                }
+            });
+        }
+
+        // Initialize sort icons
+        updateSortIcons();
+
         // =====================================================================
         // Scan Functions
         // =====================================================================
@@ -1905,6 +2078,118 @@
 
         // Load pre-analyzed accounts (from batch analysis, not from scan)
         // listType: 'profitable' (default) or 'insider'
+        async function enrichAccountsWithProfileViews(accounts) {
+            // Find accounts missing profile views
+            const walletsToEnrich = accounts
+                .filter(acc => !acc.profile_views && acc.wallet_address)
+                .map(acc => acc.wallet_address);
+
+            if (walletsToEnrich.length === 0) {
+                console.log('[Enrich] All accounts already have profile views');
+                return;
+            }
+
+            console.log(`[Enrich] Fetching profile views for ${walletsToEnrich.length} accounts...`);
+
+            try {
+                const response = await fetch('/api/discovery/enrich-profile-views', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(walletsToEnrich)
+                });
+
+                if (!response.ok) throw new Error('Failed to fetch profile views');
+
+                const data = await response.json();
+                const results = data.results || {};
+
+                // Update accounts with fetched data
+                let enrichedCount = 0;
+                for (const acc of accounts) {
+                    const wallet = (acc.wallet_address || '').toLowerCase();
+                    if (wallet && results[wallet]) {
+                        acc.profile_views = results[wallet].views || 0;
+                        acc.profile_username = results[wallet].username || null;
+                        enrichedCount++;
+                    }
+                }
+
+                console.log(`[Enrich] Updated ${enrichedCount} accounts with profile views`);
+            } catch (error) {
+                console.warn('[Enrich] Failed to fetch profile views:', error);
+            }
+        }
+
+        async function bulkCategorizeAccounts(accounts) {
+            // Find accounts with placeholder categories
+            const placeholderCategories = ['Diversified', 'Unknown', 'Other', 'other', ''];
+            const needsCategorization = accounts.filter(acc => {
+                const wallet = (acc.wallet_address || '').toLowerCase();
+                if (categoryCache[wallet]) return false;
+                if (acc.category_breakdown && Object.keys(acc.category_breakdown).length > 0) return false;
+                return !acc.primary_category || placeholderCategories.includes(acc.primary_category);
+            });
+
+            if (needsCategorization.length === 0) {
+                console.log('[Categorize] All accounts already have categories');
+                return;
+            }
+
+            // Process in batches of 25 to avoid overwhelming the API
+            const batchSize = 25;
+            let totalCategorized = 0;
+
+            console.log(`[Categorize] Categorizing ${needsCategorization.length} accounts in batches of ${batchSize}...`);
+
+            for (let i = 0; i < needsCategorization.length; i += batchSize) {
+                const batch = needsCategorization.slice(i, i + batchSize);
+                const wallets = batch.map(acc => acc.wallet_address);
+
+                try {
+                    const response = await fetch('/api/discovery/categorize', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            wallet_addresses: wallets,
+                            sample_trades: 50
+                        })
+                    });
+
+                    if (!response.ok) continue;
+
+                    const data = await response.json();
+                    const results = data.results || {};
+
+                    // Update accounts and cache
+                    for (const [wallet, result] of Object.entries(results)) {
+                        const walletLower = wallet.toLowerCase();
+                        categoryCache[walletLower] = result;
+
+                        // Find and update account
+                        const acc = accounts.find(a => (a.wallet_address || '').toLowerCase() === walletLower);
+                        if (acc && result.primary_category) {
+                            acc.primary_category = result.primary_category;
+                            acc.category_breakdown = result.category_breakdown;
+                            acc.category_concentration = result.category_concentration;
+                            totalCategorized++;
+                        }
+                    }
+
+                    console.log(`[Categorize] Batch ${Math.floor(i/batchSize) + 1}: ${Object.keys(results).length} accounts`);
+
+                } catch (error) {
+                    console.warn(`[Categorize] Batch ${Math.floor(i/batchSize) + 1} failed:`, error);
+                }
+
+                // Small delay between batches
+                if (i + batchSize < needsCategorization.length) {
+                    await new Promise(r => setTimeout(r, 100));
+                }
+            }
+
+            console.log(`[Categorize] Done - categorized ${totalCategorized} accounts`);
+        }
+
         async function loadPreAnalyzedAccounts(listType = 'profitable') {
             try {
                 const listName = listType === 'insider' ? 'Insider Suspects' : 'Profitable Traders';
@@ -1927,6 +2212,22 @@
 
                 // Normalize the data format
                 rawScanResults = normalizeAccountData(accounts, listType === 'insider' ? 'insider-suspects' : 'pre-analyzed');
+
+                // Enrich with profile views if missing (non-blocking)
+                enrichAccountsWithProfileViews(rawScanResults).then(() => {
+                    // Re-render table after enrichment to show updated views
+                    if (filteredAccounts.length > 0) {
+                        renderAnalyzedTable();
+                    }
+                });
+
+                // Bulk categorize accounts with placeholder categories (non-blocking)
+                bulkCategorizeAccounts(rawScanResults).then(() => {
+                    // Re-render after categorization
+                    if (filteredAccounts.length > 0) {
+                        renderAnalyzedTable();
+                    }
+                });
 
                 // Re-enable dropdown
                 select.disabled = false;
@@ -2519,6 +2820,10 @@
                         aVal = parseFloat(a.total_pnl) || 0;
                         bVal = parseFloat(b.total_pnl) || 0;
                         break;
+                    case 'win_rate':
+                        aVal = a.win_rate || 0;
+                        bVal = b.win_rate || 0;
+                        break;
                     case 'max_drawdown_pct':
                         aVal = a.max_drawdown_pct || a.estimated_drawdown_pct || 0;
                         bVal = b.max_drawdown_pct || b.estimated_drawdown_pct || 0;
@@ -2530,6 +2835,10 @@
                     case 'trades_last_7d':
                         aVal = a.trades_last_7d || 0;
                         bVal = b.trades_last_7d || 0;
+                        break;
+                    case 'unique_markets':
+                        aVal = a.unique_markets || 0;
+                        bVal = b.unique_markets || 0;
                         break;
                     case 'activity_recency_days':
                         aVal = a.activity_recency_days || 999;
@@ -2908,6 +3217,173 @@
         }
 
         // =====================================================================
+        // Watchlist/Dismissed Panel Helpers
+        // =====================================================================
+        function renderAccountTable(wallets, mode) {
+            // mode: 'watchlist' or 'dismissed'
+            const categoryColors = {
+                'Crypto': 'bg-orange-600/30 text-orange-400',
+                'Politics': 'bg-blue-600/30 text-blue-400',
+                'Sports': 'bg-green-600/30 text-green-400',
+                'Finance': 'bg-emerald-600/30 text-emerald-400',
+                'Weather': 'bg-cyan-600/30 text-cyan-400',
+                'Tech': 'bg-purple-600/30 text-purple-400',
+                'Culture': 'bg-pink-600/30 text-pink-400',
+                'Diversified': 'bg-gray-600/30 text-gray-400',
+                'Other': 'bg-gray-600/30 text-gray-400',
+            };
+
+            const rows = wallets.map(wallet => {
+                const account = rawScanResults.find(a => (a.wallet_address || a.wallet) === wallet);
+                if (!account) {
+                    // Account not in raw results - show minimal info
+                    return `
+                        <tr class="panel-row cursor-pointer hover:bg-gray-700/50" data-wallet="${wallet}">
+                            <td class="py-2 px-2">
+                                <span class="text-sm text-gray-300 font-mono">${wallet.substring(0, 8)}...${wallet.substring(38)}</span>
+                            </td>
+                            <td class="py-2 text-gray-500 text-sm" colspan="9">Account data not loaded</td>
+                            <td class="py-2">
+                                <div class="flex items-center justify-center gap-1">
+                                    ${mode === 'watchlist' ? `
+                                        <button class="panel-remove-btn p-1.5 rounded hover:bg-gray-600 text-red-400 hover:text-red-300 transition" data-wallet="${wallet}" title="Remove from watchlist">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                        </button>
+                                    ` : `
+                                        <button class="panel-restore-btn p-1.5 rounded hover:bg-gray-600 text-green-400 hover:text-green-300 transition" data-wallet="${wallet}" title="Restore">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
+                                        </button>
+                                    `}
+                                    <a href="https://polymarket.com/profile/${wallet}" target="_blank" class="p-1.5 rounded hover:bg-gray-600 text-gray-500 hover:text-purple-400 transition" title="View on Polymarket">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }
+
+                const shortWallet = wallet.substring(0, 8) + '...' + wallet.substring(38);
+                const score = account.systematic_score || account.insider_score || 0;
+                const scoreClass = score >= 90 ? 'bg-green-600' : score >= 80 ? 'bg-blue-600' : score >= 65 ? 'bg-yellow-600' : 'bg-red-600';
+
+                const pnl = parseFloat(account.total_pnl) || 0;
+                const pnlColor = pnl >= 0 ? 'text-green-400' : 'text-red-400';
+                const pnlStr = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toLocaleString(undefined, {maximumFractionDigits: 0});
+
+                const winRate = account.win_rate;
+                const winRateDisplay = winRate != null ? (winRate * 100).toFixed(1) + '%' : '-';
+                const winRateColor = winRate >= 0.6 ? 'text-green-400' : winRate >= 0.5 ? 'text-yellow-400' : 'text-red-400';
+
+                const maxDrawdown = account.max_drawdown_pct || 0;
+                const ddColor = maxDrawdown <= 10 ? 'text-green-400' : maxDrawdown <= 25 ? 'text-yellow-400' : 'text-red-400';
+
+                const profitFactor = account.profit_factor || 0;
+                const pfDisplay = profitFactor > 10 ? '10+' : profitFactor.toFixed(2);
+                const pfColor = profitFactor >= 2 ? 'text-green-400' : profitFactor >= 1.5 ? 'text-yellow-400' : 'text-red-400';
+
+                const trades = account.num_trades || 0;
+                const uniqueMarkets = account.unique_markets || 0;
+
+                const primaryCategory = account.primary_category || 'Other';
+                const categoryColor = categoryColors[primaryCategory] || categoryColors['Other'];
+
+                return `
+                    <tr class="panel-row cursor-pointer hover:bg-gray-700/50" data-wallet="${wallet}">
+                        <td class="py-2 px-2">
+                            <span class="text-sm text-gray-300 font-mono">${shortWallet}</span>
+                        </td>
+                        <td class="py-2">
+                            <span class="px-2 py-0.5 rounded text-xs font-medium ${categoryColor}">${primaryCategory}</span>
+                        </td>
+                        <td class="py-2 text-right">
+                            <span class="inline-flex items-center justify-center w-10 h-7 rounded ${scoreClass} text-white font-bold text-sm">${score.toFixed(0)}</span>
+                        </td>
+                        <td class="py-2 text-right ${pnlColor} font-medium">${pnlStr}</td>
+                        <td class="py-2 text-right ${winRateColor} text-sm">${winRateDisplay}</td>
+                        <td class="py-2 text-right ${ddColor} text-sm">${maxDrawdown.toFixed(1)}%</td>
+                        <td class="py-2 text-right ${pfColor} text-sm">${pfDisplay}</td>
+                        <td class="py-2 text-right text-gray-300">${trades.toLocaleString()}</td>
+                        <td class="py-2 text-right text-gray-400">${uniqueMarkets}</td>
+                        <td class="py-2">
+                            <div class="flex items-center justify-center gap-1">
+                                ${mode === 'watchlist' ? `
+                                    <button class="panel-remove-btn p-1.5 rounded hover:bg-gray-600 text-red-400 hover:text-red-300 transition" data-wallet="${wallet}" title="Remove from watchlist">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                    </button>
+                                ` : `
+                                    <button class="panel-restore-btn p-1.5 rounded hover:bg-gray-600 text-green-400 hover:text-green-300 transition" data-wallet="${wallet}" title="Restore">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
+                                    </button>
+                                `}
+                                <a href="https://polymarket.com/profile/${wallet}" target="_blank" class="p-1.5 rounded hover:bg-gray-600 text-gray-500 hover:text-purple-400 transition" title="View on Polymarket" onclick="event.stopPropagation();">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            return `
+                <table class="w-full text-left text-gray-400 text-sm">
+                    <thead class="text-xs uppercase border-b border-gray-700">
+                        <tr>
+                            <th class="pb-2 px-2">Trader</th>
+                            <th class="pb-2">Category</th>
+                            <th class="pb-2 text-right">Score</th>
+                            <th class="pb-2 text-right">PnL</th>
+                            <th class="pb-2 text-right">Win%</th>
+                            <th class="pb-2 text-right">DD</th>
+                            <th class="pb-2 text-right">PF</th>
+                            <th class="pb-2 text-right">Trades</th>
+                            <th class="pb-2 text-right">Mkts</th>
+                            <th class="pb-2 text-center">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700/50">
+                        ${rows}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function attachPanelRowHandlers(mode) {
+            const containerId = mode === 'watchlist' ? 'watchlist-content' : 'dismissed-content';
+            const container = document.getElementById(containerId);
+
+            // Row click to open modal
+            container.querySelectorAll('.panel-row').forEach(row => {
+                row.addEventListener('click', (e) => {
+                    // Don't open modal if clicking action buttons
+                    if (e.target.closest('button') || e.target.closest('a')) return;
+                    const wallet = row.dataset.wallet;
+                    openAccountModal(wallet);
+                });
+            });
+
+            // Remove/restore button handlers
+            if (mode === 'watchlist') {
+                container.querySelectorAll('.panel-remove-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const wallet = btn.dataset.wallet;
+                        toggleWatchlistItem(wallet);
+                        renderWatchlist();
+                    });
+                });
+            } else {
+                container.querySelectorAll('.panel-restore-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const wallet = btn.dataset.wallet;
+                        undismissAccount(wallet);
+                    });
+                });
+            }
+        }
+
+        // =====================================================================
         // Watchlist Functions
         // =====================================================================
         function toggleWatchlistItem(wallet) {
@@ -2919,6 +3395,7 @@
             }
             localStorage.setItem('discovery_watchlist', JSON.stringify(watchlist));
             document.getElementById('watchlist-count').textContent = watchlist.length;
+            document.getElementById('watchlist-count-panel').textContent = watchlist.length;
 
             // Re-render table to update star icons
             renderAnalyzedTable();
@@ -2940,31 +3417,15 @@
 
         function renderWatchlist() {
             const container = document.getElementById('watchlist-content');
+            document.getElementById('watchlist-count-panel').textContent = watchlist.length;
 
             if (watchlist.length === 0) {
                 container.innerHTML = '<p class="text-gray-400 text-sm">No accounts in watchlist yet. Click the star icon on any trader to add.</p>';
                 return;
             }
 
-            container.innerHTML = watchlist.map(wallet => {
-                const account = rawScanResults.find(a => (a.wallet_address || a.wallet) === wallet);
-                const pnl = account ? parseFloat(account.total_pnl) || 0 : 0;
-                const score = account?.systematic_score || 0;
-
-                return `
-                    <div class="flex items-center justify-between bg-gray-700/50 rounded-lg p-3">
-                        <div>
-                            <span class="text-sm text-gray-300 font-mono">${wallet.substring(0, 10)}...${wallet.substring(38)}</span>
-                            ${account ? `<span class="ml-2 text-xs text-gray-500">Score: ${score.toFixed(0)} | PnL: $${pnl.toLocaleString()}</span>` : ''}
-                        </div>
-                        <button onclick="toggleWatchlistItem('${wallet}')" class="text-red-400 hover:text-red-300">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                            </svg>
-                        </button>
-                    </div>
-                `;
-            }).join('');
+            container.innerHTML = renderAccountTable(watchlist, 'watchlist');
+            attachPanelRowHandlers('watchlist');
         }
 
         // =====================================================================
@@ -3017,23 +3478,8 @@
                 return;
             }
 
-            container.innerHTML = dismissed.map(wallet => {
-                const account = rawScanResults.find(a => (a.wallet_address || a.wallet) === wallet);
-                const pnl = account ? parseFloat(account.total_pnl) || 0 : 0;
-                const score = account?.systematic_score || 0;
-
-                return `
-                    <div class="flex items-center justify-between bg-gray-700/50 rounded-lg p-3">
-                        <div>
-                            <span class="text-sm text-gray-300 font-mono">${wallet.substring(0, 10)}...${wallet.substring(38)}</span>
-                            ${account ? `<span class="ml-2 text-xs text-gray-500">Score: ${score.toFixed(0)} | PnL: $${pnl.toLocaleString()}</span>` : ''}
-                        </div>
-                        <button onclick="undismissAccount('${wallet}')" class="text-green-400 hover:text-green-300 text-sm">
-                            Restore
-                        </button>
-                    </div>
-                `;
-            }).join('');
+            container.innerHTML = renderAccountTable(dismissed, 'dismissed');
+            attachPanelRowHandlers('dismissed');
         }
 
         function updateDismissedCount() {
@@ -3087,6 +3533,7 @@
         // =====================================================================
         updatePanelStates();
         document.getElementById('watchlist-count').textContent = watchlist.length;
+        document.getElementById('watchlist-count-panel').textContent = watchlist.length;
         document.getElementById('dismissed-count').textContent = dismissed.length;
 
         // Load user preferences (dismissed list) from server
