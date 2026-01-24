@@ -664,8 +664,9 @@ def create_wide_net_profitability_config() -> ModeConfig:
             "min_total_pnl": FilterConfig(
                 name="Minimum Total P/L ($)",
                 description="Must have made at least some profit",
-                is_hard_filter=True,
-                threshold=100,  # At least $100 profit total
+                is_hard_filter=False,  # Disabled: leaderboard already filters by P/L
+                enabled=False,  # Computed P/L from 90-day history is unreliable
+                threshold=100,
                 threshold_min=-10000,
                 threshold_max=10000,
             ),
@@ -764,6 +765,52 @@ def create_wide_net_profitability_config() -> ModeConfig:
                 threshold_min=7,
                 threshold_max=365,
                 weight=0.5,
+                pass_bonus=5,
+                fail_penalty=0,
+            ),
+
+            # ============================================================
+            # COPYTRADE VIABILITY METRICS
+            # These help identify traders whose returns are actually copyable
+            # vs those who got lucky on a few trades
+            # ============================================================
+            "market_win_rate": FilterConfig(
+                name="Market Win Rate %",
+                description="% of unique markets with profit (higher = more consistent, more copyable)",
+                threshold=50,  # Want > 50% of markets to be profitable
+                threshold_min=30,
+                threshold_max=80,
+                weight=2.5,  # High weight - key copyability indicator
+                pass_bonus=25,
+                fail_penalty=15,
+            ),
+            "top_3_concentration": FilterConfig(
+                name="Top 3 Trades Concentration %",
+                description="% of profit from top 3 trades (lower = more distributed, more copyable)",
+                threshold=50,  # Want < 50% - if higher, too dependent on catching specific trades
+                threshold_min=20,
+                threshold_max=90,
+                weight=2.5,  # High weight - critical luck detector
+                pass_bonus=25,
+                fail_penalty=20,
+            ),
+            "simulated_50pct_capture": FilterConfig(
+                name="50% Capture Simulation ($)",
+                description="Median P/L if you only capture 50% of trades (positive = copyable)",
+                threshold=100,  # Want at least $100 profit at 50% capture
+                threshold_min=0,
+                threshold_max=10000,
+                weight=2.0,
+                pass_bonus=20,
+                fail_penalty=10,
+            ),
+            "redemption_pct": FilterConfig(
+                name="Resolution Profit %",
+                description="% of profits from holding to resolution vs selling early (informational)",
+                threshold=30,
+                threshold_min=0,
+                threshold_max=100,
+                weight=0.5,  # Low weight - just informational
                 pass_bonus=5,
                 fail_penalty=0,
             ),
@@ -1071,11 +1118,19 @@ class ScoringEngine:
                 (100 - risk_score) * self.config.risk_weight
             )
 
-        # Apply confidence adjustment
-        if confidence == "low":
-            composite *= 0.8
-        elif confidence == "medium":
-            composite *= 0.9
+        # Apply confidence adjustment (less aggressive for wide net mode)
+        if self.mode == DiscoveryMode.WIDE_NET_PROFITABILITY:
+            # Wide net mode: minimal confidence penalty - we want to collect broadly
+            if confidence == "low":
+                composite *= 0.95  # Only 5% penalty instead of 20%
+            elif confidence == "medium":
+                composite *= 0.98  # Only 2% penalty instead of 10%
+        else:
+            # Other modes: standard confidence adjustment
+            if confidence == "low":
+                composite *= 0.8
+            elif confidence == "medium":
+                composite *= 0.9
 
         composite = max(0, min(100, composite))
 
@@ -1130,13 +1185,21 @@ class ScoringEngine:
         filter_results: dict,
         red_flags: list,
     ) -> float:
-        """Calculate P/L consistency score."""
+        """Calculate P/L consistency score.
+
+        Key indicators of systematic trading:
+        - High Sharpe/Sortino ratio (risk-adjusted returns)
+        - Good profit factor (wins > losses)
+        - Low drawdowns (risk management)
+        - Distributed wins (not luck-dependent)
+        - Consistent win/loss sizes (disciplined exits)
+        """
         if not pl_metrics:
             return 30  # Neutral
 
         score = 50  # Start neutral
 
-        # Sharpe ratio contribution
+        # Sharpe ratio - risk-adjusted returns
         if pl_metrics.sharpe_ratio >= 1.5:
             score += 20
         elif pl_metrics.sharpe_ratio >= 1.0:
@@ -1151,15 +1214,23 @@ class ScoringEngine:
                 "description": f"Low Sharpe ratio: {pl_metrics.sharpe_ratio:.2f}",
             })
 
-        # Profit factor
-        if pl_metrics.profit_factor >= 2.0:
+        # Sortino ratio bonus - rewards downside protection (systematic traders manage losses)
+        if pl_metrics.sortino_ratio >= 2.0:
+            score += 10
+        elif pl_metrics.sortino_ratio >= 1.5:
+            score += 5
+
+        # Profit factor - core edge indicator
+        if pl_metrics.profit_factor >= 3.0:
+            score += 20
+        elif pl_metrics.profit_factor >= 2.0:
             score += 15
         elif pl_metrics.profit_factor >= 1.5:
             score += 10
         elif pl_metrics.profit_factor < 1.0:
             score -= 20
 
-        # Drawdown
+        # Drawdown - risk management indicator
         if pl_metrics.max_drawdown_pct > 0.4:
             score -= 20
             red_flags.append({
@@ -1169,19 +1240,128 @@ class ScoringEngine:
             })
         elif pl_metrics.max_drawdown_pct > 0.25:
             score -= 10
+        elif pl_metrics.max_drawdown_pct < 0.10:
+            score += 15  # Very low drawdown = excellent risk management
         elif pl_metrics.max_drawdown_pct < 0.15:
             score += 10
 
-        # Single win dependency
-        if pl_metrics.largest_win_pct_of_total > 0.5:
-            score -= 25
+        # TOP 3 WINS CONCENTRATION - Critical luck detector
+        # If top 3 trades = most of the profit, it's likely luck not skill
+        if pl_metrics.top_3_wins_pct_of_total > 0.85:
+            score -= 30
+            red_flags.append({
+                "type": RedFlagType.SINGLE_WIN_DEPENDENT.value,
+                "severity": "critical",
+                "description": f"Top 3 trades = {pl_metrics.top_3_wins_pct_of_total*100:.0f}% of total P/L (luck indicator)",
+            })
+        elif pl_metrics.top_3_wins_pct_of_total > 0.70:
+            score -= 20
             red_flags.append({
                 "type": RedFlagType.SINGLE_WIN_DEPENDENT.value,
                 "severity": "high",
-                "description": f"{pl_metrics.largest_win_pct_of_total*100:.0f}% of P/L from one trade",
+                "description": f"Top 3 trades = {pl_metrics.top_3_wins_pct_of_total*100:.0f}% of total P/L",
             })
+        elif pl_metrics.top_3_wins_pct_of_total > 0.50:
+            score -= 10
+        elif pl_metrics.top_3_wins_pct_of_total < 0.30:
+            score += 10  # Well-distributed profits = systematic
+
+        # Single win dependency (still check, but less harsh since top 3 is checked)
+        if pl_metrics.largest_win_pct_of_total > 0.5:
+            score -= 15  # Reduced from 25 since top_3 check covers this
+            if pl_metrics.top_3_wins_pct_of_total <= 0.70:  # Only add if not already flagged
+                red_flags.append({
+                    "type": RedFlagType.SINGLE_WIN_DEPENDENT.value,
+                    "severity": "high",
+                    "description": f"{pl_metrics.largest_win_pct_of_total*100:.0f}% of P/L from one trade",
+                })
         elif pl_metrics.largest_win_pct_of_total > 0.35:
-            score -= 15
+            score -= 8
+
+        # WIN/LOSS SIZE RATIO - Disciplined exit indicator
+        # Systematic traders often have defined risk/reward ratios
+        avg_win = float(pl_metrics.avg_win_size) if pl_metrics.avg_win_size else 0
+        avg_loss = float(pl_metrics.avg_loss_size) if pl_metrics.avg_loss_size else 1
+        if avg_loss > 0 and avg_win > 0:
+            win_loss_ratio = avg_win / avg_loss
+            if win_loss_ratio >= 3.0:
+                score += 10  # Great risk/reward
+            elif win_loss_ratio >= 2.0:
+                score += 5
+            elif win_loss_ratio < 0.5:
+                score -= 10  # Wins smaller than losses = poor discipline
+                red_flags.append({
+                    "type": RedFlagType.VOLATILE_PL_CURVE.value,
+                    "severity": "medium",
+                    "description": f"Avg win (${avg_win:.0f}) smaller than avg loss (${avg_loss:.0f})",
+                })
+
+        # WIN COUNT CHECK - Need enough winning trades for statistical significance
+        win_count = pl_metrics.win_count if hasattr(pl_metrics, 'win_count') else 0
+        if win_count >= 20:
+            score += 5  # Good sample size
+        elif win_count < 5:
+            score -= 10  # Too few wins to judge
+
+        # EQUITY CURVE SMOOTHNESS - Systematic traders have steady growth
+        # Low average drawdown = smooth equity curve
+        if pl_metrics.avg_drawdown_pct < 0.05:
+            score += 10  # Very smooth curve
+        elif pl_metrics.avg_drawdown_pct < 0.10:
+            score += 5
+        elif pl_metrics.avg_drawdown_pct > 0.25:
+            score -= 10  # Choppy equity curve
+
+        # Recovery time consistency - systematic traders recover quickly and consistently
+        if pl_metrics.avg_recovery_time_days > 0:
+            if pl_metrics.avg_recovery_time_days < 7:
+                score += 5  # Quick recovery from drawdowns
+            elif pl_metrics.avg_recovery_time_days > 30:
+                score -= 5  # Slow recovery = struggling to return to form
+
+        # WIN/LOSS STREAK BALANCE - Extreme streaks suggest luck/variance
+        # Systematic traders have moderate, balanced streaks
+        max_streak = max(pl_metrics.longest_win_streak, pl_metrics.longest_loss_streak)
+        if max_streak > 15:
+            score -= 10  # Very long streak suggests variance, not skill
+        elif pl_metrics.longest_win_streak > 10 and pl_metrics.longest_loss_streak < 3:
+            score -= 5  # Suspicious - very asymmetric streaks
+
+        # ============================================================
+        # COPYTRADE VIABILITY METRICS
+        # These indicate how well returns would transfer to a copytrader
+        # ============================================================
+
+        # MARKET WIN RATE - More important than trade win rate for copytrading
+        # If they profit on most markets, you're more likely to profit even if you miss some
+        if pl_metrics.market_win_rate >= 0.60:
+            score += 15  # Very consistent - profits on most markets
+        elif pl_metrics.market_win_rate >= 0.50:
+            score += 10
+        elif pl_metrics.market_win_rate >= 0.40:
+            score += 5
+        elif pl_metrics.market_win_rate < 0.25:
+            score -= 15  # Poor consistency - profits on few markets
+            red_flags.append({
+                "type": RedFlagType.SINGLE_WIN_DEPENDENT.value,
+                "severity": "high",
+                "description": f"Only {pl_metrics.market_win_rate*100:.0f}% of markets profitable - likely luck",
+            })
+
+        # SIMULATED CAPTURE - Would copytrading be profitable?
+        # If 50% capture simulation is still profitable, returns are copyable
+        if pl_metrics.simulated_50pct_capture_median > 0:
+            if pl_metrics.simulated_50pct_capture_median >= 1000:
+                score += 10  # Very copyable
+            elif pl_metrics.simulated_50pct_capture_median >= 100:
+                score += 5
+        else:
+            score -= 10  # 50% capture would likely lose money
+            red_flags.append({
+                "type": RedFlagType.SINGLE_WIN_DEPENDENT.value,
+                "severity": "medium",
+                "description": f"50% capture simulation shows ${pl_metrics.simulated_50pct_capture_median:.0f} - returns not copyable",
+            })
 
         return max(0, min(100, score))
 
@@ -1191,7 +1371,14 @@ class ScoringEngine:
         filter_results: dict,
         red_flags: list,
     ) -> float:
-        """Calculate pattern match score using soft filters."""
+        """Calculate pattern match score using soft filters.
+
+        Key indicators of systematic trading:
+        - Consistent position sizing (low coefficient of variation)
+        - Regular trading frequency (active over time, not bursty)
+        - Market diversification (not over-concentrated, not over-spread)
+        - Disciplined entry odds preferences
+        """
         if not pattern_metrics:
             return 30
 
@@ -1224,8 +1411,69 @@ class ScoringEngine:
             else:
                 score -= fconfig.fail_penalty * fconfig.weight
 
-        # Whale check
+        # POSITION SIZE CONSISTENCY - Key systematic trader indicator
+        # Coefficient of variation (CV) = std_dev / mean
+        # Lower CV = more consistent position sizing = more systematic
         avg_pos = float(pattern_metrics.avg_position_size_usd)
+        pos_std_dev = float(pattern_metrics.position_size_std_dev)
+        if avg_pos > 0:
+            coefficient_of_variation = pos_std_dev / avg_pos
+            if coefficient_of_variation < 0.5:
+                score += 15  # Very consistent sizing - strong systematic signal
+            elif coefficient_of_variation < 1.0:
+                score += 8  # Reasonably consistent
+            elif coefficient_of_variation > 2.5:
+                score -= 10  # Highly erratic sizing - gambler behavior
+                red_flags.append({
+                    "type": RedFlagType.VOLATILE_PL_CURVE.value,
+                    "severity": "low",
+                    "description": f"Erratic position sizing (CV: {coefficient_of_variation:.1f})",
+                })
+            elif coefficient_of_variation > 1.5:
+                score -= 5
+
+        # TRADING FREQUENCY CONSISTENCY
+        # Systematic traders trade regularly, not in bursts
+        if pattern_metrics.active_days > 0 and pattern_metrics.account_age_days > 0:
+            activity_ratio = pattern_metrics.active_days / pattern_metrics.account_age_days
+            if activity_ratio >= 0.5:
+                score += 10  # Active more than half the days = regular trader
+            elif activity_ratio >= 0.3:
+                score += 5
+            elif activity_ratio < 0.1:
+                score -= 10  # Very sporadic - not systematic
+                red_flags.append({
+                    "type": RedFlagType.INSUFFICIENT_HISTORY.value,
+                    "severity": "low",
+                    "description": f"Sporadic trading ({activity_ratio*100:.0f}% of days active)",
+                })
+
+        # MARKET DIVERSIFICATION SWEET SPOT
+        # Too few markets = concentrated risk, too many = unfocused
+        num_markets = pattern_metrics.unique_markets_traded
+        if 10 <= num_markets <= 100:
+            score += 5  # Good diversification
+        elif num_markets < 5:
+            score -= 10  # Over-concentrated
+        elif num_markets > 200:
+            score -= 5  # Scatter-shot approach, less systematic
+
+        # MEDIAN VS AVG POSITION SIZE - Detect outlier bets
+        # If median << avg, there are large outlier bets (gambler behavior)
+        median_pos = float(pattern_metrics.median_position_size_usd)
+        if avg_pos > 0 and median_pos > 0:
+            median_to_avg_ratio = median_pos / avg_pos
+            if median_to_avg_ratio >= 0.7:
+                score += 5  # Median close to avg = no big outliers
+            elif median_to_avg_ratio < 0.3:
+                score -= 10  # Big gap = occasional yolo bets
+                red_flags.append({
+                    "type": RedFlagType.POSITION_CONCENTRATION.value,
+                    "severity": "low",
+                    "description": f"Position outliers detected (median/avg: {median_to_avg_ratio:.2f})",
+                })
+
+        # Whale check (keep original logic)
         if avg_pos > 500:
             score -= 15
             red_flags.append({
@@ -1234,14 +1482,30 @@ class ScoringEngine:
                 "description": f"Large avg position: ${avg_pos:.0f}",
             })
 
-        # Insufficient data check
-        if pattern_metrics.total_trades < 50:
-            score -= 20
+        # Insufficient data check (keep but adjust threshold)
+        if pattern_metrics.total_trades < 20:
+            score -= 25  # Severe penalty - can't judge systematic with few trades
+            red_flags.append({
+                "type": RedFlagType.INSUFFICIENT_HISTORY.value,
+                "severity": "high",
+                "description": f"Only {pattern_metrics.total_trades} trades",
+            })
+        elif pattern_metrics.total_trades < 50:
+            score -= 10
             red_flags.append({
                 "type": RedFlagType.INSUFFICIENT_HISTORY.value,
                 "severity": "medium",
                 "description": f"Only {pattern_metrics.total_trades} trades",
             })
+
+        # RECENCY CHECK - Prefer active accounts
+        days_since_last = getattr(pattern_metrics, 'days_since_last_trade', 0)
+        if days_since_last <= 7:
+            score += 5  # Active recently
+        elif days_since_last > 60:
+            score -= 10  # Dormant account
+        elif days_since_last > 30:
+            score -= 5
 
         return max(0, min(100, score))
 
@@ -1438,6 +1702,14 @@ class ScoringEngine:
                 "max_drawdown": pl_metrics.max_drawdown_pct * 100,
                 "win_rate": pl_metrics.win_rate * 100,
                 "win_rate_at_long_odds": pl_metrics.win_rate * 100,  # Approximation
+                # Copytrade viability metrics
+                "market_win_rate": pl_metrics.market_win_rate * 100,
+                "top_3_concentration": pl_metrics.top_3_wins_pct_of_total * 100,
+                "top_5_concentration": pl_metrics.top_5_wins_pct_of_total * 100,
+                "top_10_concentration": pl_metrics.top_10_wins_pct_of_total * 100,
+                "simulated_50pct_capture": pl_metrics.simulated_50pct_capture_median,
+                "simulated_25pct_capture": pl_metrics.simulated_25pct_capture_median,
+                "redemption_pct": pl_metrics.redemption_pct_of_profit * 100,
             }
             if filter_name in mapping:
                 return mapping[filter_name]
@@ -1474,6 +1746,8 @@ class ScoringEngine:
             "max_mainstream_pct", "max_single_market_pct", "max_account_age",
             "win_rate_delta", "recent_activity", "very_fresh_account", "fresh_account",
             "largest_win_pct",  # Lower concentration = better
+            # Copytrade viability: lower concentration = more copyable
+            "top_3_concentration", "top_5_concentration", "top_10_concentration",
         ]
 
         if less_is_better:

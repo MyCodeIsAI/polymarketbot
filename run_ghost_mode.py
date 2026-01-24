@@ -64,6 +64,13 @@ try:
 except ImportError:
     DISCOVERY_AVAILABLE = False
 
+# Import insider scanner router for API endpoints
+try:
+    from src.web.api.insider_routes import router as insider_router
+    INSIDER_AVAILABLE = True
+except ImportError:
+    INSIDER_AVAILABLE = False
+
 
 class ConnectionManager:
     """WebSocket connection manager for real-time updates."""
@@ -447,6 +454,132 @@ async def run_dashboard(port: int = DEFAULT_PORT):
         return {"success": True}
 
     # ==========================================================================
+    # Per-Account P/L Tracking APIs
+    # ==========================================================================
+
+    @app.get("/api/accounts/pnl")
+    async def get_all_account_pnl():
+        """Get P/L summary for all tracked accounts."""
+        pnl_by_name = ghost_state.get_all_account_pnl()
+
+        # Map account names to account IDs for the UI
+        pnl_by_id = {}
+        for account_id, account in ghost_state.accounts.items():
+            if account.name in pnl_by_name:
+                pnl_by_id[str(account_id)] = pnl_by_name[account.name]
+
+        return {"accounts": pnl_by_id}
+
+    @app.get("/api/accounts/{account_id}/pnl")
+    async def get_account_pnl(account_id: int):
+        """Get P/L summary for a specific tracked account."""
+        if account_id not in ghost_state.accounts:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        account = ghost_state.accounts[account_id]
+        pnl = ghost_state.get_account_pnl(account.name)
+        return pnl if pnl else {
+            "account_name": account.name,
+            "total_trades": 0,
+            "winning_trades": 0,
+            "losing_trades": 0,
+            "open_trades": 0,
+            "realized_pnl": 0.0,
+            "unrealized_pnl": 0.0,
+            "total_pnl": 0.0,
+            "total_volume": 0.0,
+            "validated_trades": 0,
+            "unvalidated_trades": 0,
+            "win_rate": 0.0,
+            "last_updated": None,
+        }
+
+    @app.post("/api/accounts/pnl/sync")
+    async def sync_account_pnl():
+        """Sync P/L data with Polymarket API (validates positions and calculates P/L)."""
+        try:
+            pnl_data = await ghost_state.sync_account_pnl()
+            return {
+                "success": True,
+                "accounts": pnl_data,
+                "synced_at": datetime.utcnow().isoformat(),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    @app.get("/api/accounts/{account_id}/trades")
+    async def get_account_trades(account_id: int):
+        """Get all executed trades for a specific account."""
+        if account_id not in ghost_state.accounts:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        account = ghost_state.accounts[account_id]
+
+        if ghost_state._pnl_tracker:
+            return ghost_state._pnl_tracker.get_trades_for_account(account.name)
+        return []
+
+    # ==========================================================================
+    # Drawdown / Stoploss APIs
+    # ==========================================================================
+
+    @app.get("/api/accounts/drawdowns")
+    async def get_all_drawdowns():
+        """Get drawdown status for all accounts."""
+        return ghost_state.update_account_drawdowns()
+
+    @app.get("/api/accounts/{account_id}/drawdown")
+    async def get_account_drawdown(account_id: int):
+        """Get drawdown status for a specific account."""
+        if account_id not in ghost_state.accounts:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        account = ghost_state.accounts[account_id]
+        drawdown_pct = account.get_drawdown_percent()
+
+        return {
+            "account_id": account_id,
+            "name": account.name,
+            "max_drawdown_percent": float(account.max_drawdown_percent),
+            "current_drawdown_percent": float(drawdown_pct) if drawdown_pct is not None else None,
+            "peak_value": float(account.peak_value) if account.peak_value else None,
+            "current_value": float(account.current_value) if account.current_value else None,
+            "baseline_value": float(account.baseline_value) if account.baseline_value else None,
+            "stoploss_triggered": account.stoploss_triggered,
+        }
+
+    @app.post("/api/accounts/{account_id}/reset-stoploss")
+    async def reset_account_stoploss(account_id: int):
+        """Reset stoploss for a specific account (manual override)."""
+        if account_id not in ghost_state.accounts:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        success = ghost_state.reset_account_stoploss(account_id)
+        if success:
+            return {"success": True, "message": f"Stoploss reset for account {account_id}"}
+        return {"success": False, "message": "Failed to reset stoploss"}
+
+    @app.post("/api/accounts/{account_id}/reset-peak")
+    async def reset_account_peak(account_id: int):
+        """Reset peak value to current value (restarts drawdown tracking)."""
+        if account_id not in ghost_state.accounts:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        account = ghost_state.accounts[account_id]
+        if account.current_value is not None:
+            account.peak_value = account.current_value
+            ghost_state._save_state()
+            return {
+                "success": True,
+                "message": f"Peak reset to current value",
+                "new_peak": float(account.peak_value)
+            }
+        return {"success": False, "message": "No current value to set as peak"}
+
+    # ==========================================================================
     # Blockchain Configuration APIs
     # ==========================================================================
 
@@ -556,7 +689,13 @@ async def run_dashboard(port: int = DEFAULT_PORT):
 
         # In GHOST MODE: Return simulated positions (filter out zero-size phantom entries)
         return [
-            {**p, "size": float(p["size"]), "avg_price": float(p["avg_price"]), "cost_basis": float(p["cost_basis"])}
+            {
+                **p,
+                "size": float(p["size"]),
+                "avg_price": float(p["avg_price"]),
+                "current_price": float(p.get("current_price", p["avg_price"])),
+                "cost_basis": float(p["cost_basis"]),
+            }
             for p in ghost_state.positions.values()
             if p["status"] == "open" and float(p["size"]) > 0
         ]
@@ -565,7 +704,13 @@ async def run_dashboard(port: int = DEFAULT_PORT):
     async def get_positions_debug():
         """Debug endpoint to see all positions including closed ones."""
         return [
-            {**p, "size": float(p["size"]), "avg_price": float(p["avg_price"]), "cost_basis": float(p["cost_basis"])}
+            {
+                **p,
+                "size": float(p["size"]),
+                "avg_price": float(p["avg_price"]),
+                "current_price": float(p.get("current_price", p["avg_price"])),
+                "cost_basis": float(p["cost_basis"]),
+            }
             for p in ghost_state.positions.values()
         ]
 
@@ -793,6 +938,22 @@ async def run_dashboard(port: int = DEFAULT_PORT):
     # Include discovery API router if available
     if DISCOVERY_AVAILABLE:
         app.include_router(discovery_router, prefix="/api")
+
+    # ==========================================================================
+    # Insider Scanner Page & API
+    # ==========================================================================
+
+    @app.get("/insider-scanner", response_class=HTMLResponse)
+    async def insider_scanner_page():
+        """Insider scanner dashboard page."""
+        template_path = PROJECT_ROOT / "src" / "web" / "templates" / "insider_scanner.html"
+        if template_path.exists():
+            return template_path.read_text()
+        return "<h1>Insider Scanner template not found</h1>"
+
+    # Include insider scanner API router if available
+    if INSIDER_AVAILABLE:
+        app.include_router(insider_router, prefix="/api")
 
     @app.get("/api/infrastructure/info")
     async def api_infrastructure_info():

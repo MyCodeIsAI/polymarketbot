@@ -57,8 +57,56 @@ except ImportError:
     CLOBClient = None
     PolymarketAuth = None
 
+# Import P/L tracker for per-account profitability tracking
+try:
+    from account_pnl import AccountPnLTracker, get_pnl_tracker, init_pnl_tracker
+    PNL_TRACKING_AVAILABLE = True
+except ImportError:
+    PNL_TRACKING_AVAILABLE = False
+    AccountPnLTracker = None
+    get_pnl_tracker = None
+    init_pnl_tracker = None
+
 # State persistence file (cross-platform)
 STATE_FILE = PROJECT_ROOT / "ghost_state.json"
+
+
+def classify_live_error(error_message: str) -> str:
+    """
+    Classify a live execution error into a specific status code.
+
+    Returns one of:
+    - 'live_error_balance': Insufficient balance or allowance
+    - 'live_error_rejected': Order rejected by exchange
+    - 'live_error_rate_limit': Rate limited by API
+    - 'live_error_network': Network/connection issues
+    - 'live_error_auth': Authentication/authorization issues
+    - 'live_error': Unknown/generic error
+    """
+    err_lower = error_message.lower()
+
+    # Balance/allowance issues
+    if any(x in err_lower for x in ['balance', 'allowance', 'insufficient', 'not enough']):
+        return 'live_error_balance'
+
+    # Order rejected
+    if any(x in err_lower for x in ['rejected', 'invalid order', 'order failed', 'cannot place']):
+        return 'live_error_rejected'
+
+    # Rate limiting
+    if any(x in err_lower for x in ['rate limit', 'too many requests', '429', 'throttle']):
+        return 'live_error_rate_limit'
+
+    # Network issues
+    if any(x in err_lower for x in ['timeout', 'connection', 'network', 'unreachable', 'reset']):
+        return 'live_error_network'
+
+    # Auth issues
+    if any(x in err_lower for x in ['unauthorized', 'forbidden', 'auth', '401', '403', 'signature']):
+        return 'live_error_auth'
+
+    # Generic fallback
+    return 'live_error'
 
 
 @dataclass
@@ -76,7 +124,7 @@ class GhostTrade:
     target_price: Decimal
     our_size: Decimal
     our_price: Decimal
-    status: str  # 'would_execute', 'filtered_keyword', 'filtered_stoploss', 'filtered_slippage', 'api_simulated', 'api_error'
+    status: str  # 'would_execute', 'filtered_keyword', 'filtered_stoploss', 'filtered_slippage', 'api_simulated', 'live_executed', 'live_error', 'live_error_balance', 'live_error_rejected', 'live_error_rate_limit', 'live_error_network', 'live_error_auth', 'live_error_setup'
 
     # Timing
     detection_ms: float = 0  # API call time
@@ -137,9 +185,18 @@ class GhostModeState:
         self.started_at: Optional[datetime] = None
 
         # Blockchain monitoring configuration
-        # Set this to a Polygon RPC URL for ~2-5s latency vs ~15-21s with API polling
-        # Example: "https://polygon-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+        # ============================================================================
+        # DUAL-RPC STRATEGY FOR COST OPTIMIZATION:
+        # - POLYGON_RPC_URL: Primary RPC (use free public endpoint like polygon-rpc.com)
+        # - ALCHEMY_RPC_URL: Optional verification RPC (Alchemy - used every 2.5 min)
+        #
+        # This keeps Alchemy usage under 1M CU/day while providing full functionality.
+        # If Alchemy key is rate-limited/expired, errors are silently ignored.
+        #
+        # LLM NOTE: Don't "fix" silent Alchemy errors - they are intentional.
+        # ============================================================================
         self.polygon_rpc_url: Optional[str] = os.environ.get("POLYGON_RPC_URL")
+        self.verification_rpc_url: Optional[str] = os.environ.get("ALCHEMY_RPC_URL")
         self._blockchain_monitor: Optional[PolygonMonitor] = None
         self.blockchain_enabled = False
         self.blockchain_trades_detected = 0
@@ -185,6 +242,8 @@ class GhostModeState:
         # Proxy/funder wallet address (where funds are held on Polymarket)
         # This is different from the signer address derived from private key
         self._funder_address: Optional[str] = os.environ.get("FUNDER_ADDRESS")
+        # Per-account P/L tracker (initialized when entering live mode)
+        self._pnl_tracker: Optional[AccountPnLTracker] = None
 
         # Add default account if none loaded
         if not self.accounts:
@@ -319,6 +378,14 @@ class GhostModeState:
             signer = self._auth.signer_address[:10]
             funder = self._funder_address[:10] if self._funder_address else signer
             print(f"  [Live] Auth initialized - Signer: {signer}... Funder: {funder}...")
+
+            # Initialize P/L tracker with our wallet address
+            if PNL_TRACKING_AVAILABLE:
+                wallet = self.get_live_wallet_address()
+                if wallet:
+                    self._pnl_tracker = init_pnl_tracker(wallet)
+                    print(f"  [Live] P/L tracker initialized for {wallet[:10]}...")
+
             return True
         except Exception as e:
             print(f"  [Live] Failed to initialize auth: {e}")
@@ -340,7 +407,7 @@ class GhostModeState:
         shutdown_ts = self.last_shutdown.timestamp()
         current_ts = datetime.utcnow().timestamp()
 
-        for account in self.accounts.values():
+        for account in list(self.accounts.values()):
             if not account.enabled:
                 continue
 
@@ -396,7 +463,7 @@ class GhostModeState:
         self.enabled = True
         self.started_at = datetime.utcnow()
         # Mark current positions as baseline - don't copy existing positions
-        for account in self.accounts.values():
+        for account in list(self.accounts.values()):
             account.last_seen_trade_id = None
 
     def stop(self):
@@ -426,6 +493,97 @@ class GhostModeState:
         if self._auth and hasattr(self._auth, 'signer_address'):
             return self._auth.signer_address
         return None
+
+    async def sync_account_pnl(self) -> Dict[str, dict]:
+        """Sync with Polymarket and calculate per-account P/L.
+
+        Returns dict of account_name -> P/L data.
+        """
+        if not self._pnl_tracker:
+            return {}
+        return await self._pnl_tracker.sync_with_polymarket()
+
+    def get_account_pnl(self, account_name: str) -> Optional[dict]:
+        """Get P/L summary for a specific tracked account."""
+        if not self._pnl_tracker:
+            return None
+        pnl = self._pnl_tracker.get_account_pnl(account_name)
+        return pnl.to_dict() if pnl else None
+
+    def get_all_account_pnl(self) -> Dict[str, dict]:
+        """Get P/L summaries for all tracked accounts."""
+        if not self._pnl_tracker:
+            return {}
+        return self._pnl_tracker.get_all_account_pnl()
+
+    def update_account_drawdowns(self) -> Dict[int, dict]:
+        """
+        Update P/L values for all accounts and check for drawdown triggers.
+
+        This calculates the current P/L from copying each account by:
+        1. Getting realized P/L from the P/L tracker (closed trades)
+        2. Getting unrealized P/L from current positions
+
+        Returns dict mapping account_id to drawdown info.
+        """
+        results = {}
+
+        for account_id, account in self.accounts.items():
+            # Get P/L data for this account from tracker
+            account_pnl = None
+            if self._pnl_tracker:
+                account_pnl = self._pnl_tracker.get_account_pnl(account.name)
+
+            if account_pnl:
+                # Calculate total P/L (realized + unrealized)
+                total_pnl = Decimal(str(account_pnl.realized_pnl)) + Decimal(str(account_pnl.unrealized_pnl))
+
+                # Update the account's P/L tracking (this updates peak if new high)
+                account.update_pnl(total_pnl)
+
+                # Check for drawdown trigger
+                drawdown_triggered = account.check_drawdown()
+
+                results[account_id] = {
+                    "name": account.name,
+                    "total_pnl": float(total_pnl),
+                    "peak_pnl": float(account.peak_value) if account.peak_value else None,
+                    "current_pnl": float(account.current_value) if account.current_value else None,
+                    "drawdown_percent": float(account.get_drawdown_percent()) if account.get_drawdown_percent() is not None else None,
+                    "max_drawdown_percent": float(account.max_drawdown_percent),
+                    "stoploss_triggered": account.stoploss_triggered,
+                    "just_triggered": drawdown_triggered,
+                }
+
+                if drawdown_triggered:
+                    print(f"  \033[31m[DRAWDOWN]\033[0m {account.name} exceeded {account.max_drawdown_percent}% drawdown - STOPLOSS TRIGGERED")
+
+        return results
+
+    def check_all_drawdowns(self) -> List[str]:
+        """
+        Check drawdowns for all accounts and return list of triggered account names.
+
+        Call this periodically (e.g., every minute) to monitor for drawdown breaches.
+        """
+        triggered = []
+
+        for account in self.accounts.values():
+            if account.check_drawdown():
+                triggered.append(account.name)
+
+        return triggered
+
+    def reset_account_stoploss(self, account_id: int) -> bool:
+        """Reset stoploss for a specific account (manual override)."""
+        if account_id not in self.accounts:
+            return False
+
+        account = self.accounts[account_id]
+        account.reset_stoploss()
+        self._save_state()
+        print(f"  [Stoploss] Reset stoploss for {account.name}")
+        return True
 
     def _get_onchain_usdc_balance(self, wallet: str) -> float:
         """Fetch USDC balance directly from Polygon blockchain.
@@ -588,6 +746,8 @@ class GhostModeState:
             "blockchain_rpc_configured": self.polygon_rpc_url is not None,
             "blockchain_trades_detected": self.blockchain_trades_detected,
             "blockchain_avg_latency_ms": round(self._blockchain_monitor.avg_latency_ms, 1) if self._blockchain_monitor else 0,
+            "blockchain_last_block": self._blockchain_monitor.last_block if self._blockchain_monitor else 0,
+            "blockchain_blocks_processed": self._blockchain_monitor.blocks_processed if self._blockchain_monitor else 0,
         }
 
     def record_ghost_trade(self, trade: GhostTrade):
@@ -671,6 +831,35 @@ def get_orderbook_price(token_id: str, side: str) -> Optional[Decimal]:
     except Exception as e:
         print(f"  [Orderbook] Error fetching for {token_id[:16]}...: {e}")
         return None
+
+
+def refresh_position_prices():
+    """
+    Refresh current market prices for all open positions.
+
+    This updates the current_price field for each position by fetching
+    the latest orderbook price. Call this periodically to keep P/L accurate.
+    """
+    updated = 0
+    for pos_key, pos in ghost_state.positions.items():
+        if pos["status"] != "open" or pos["size"] <= 0:
+            continue
+
+        token_id = pos.get("token_id", "")
+        if not token_id:
+            continue
+
+        # For open positions, we want SELL price (best bid) to value them
+        # This represents what we'd get if we sold right now
+        current_price = get_orderbook_price(token_id, "SELL")
+
+        if current_price is not None:
+            pos["current_price"] = current_price
+            updated += 1
+
+    if updated > 0:
+        print(f"  [Prices] Refreshed {updated} position price(s)")
+    return updated
 
 
 async def poll_account_activity(account: CopyTradeAccount, ws_broadcast) -> List[dict]:
@@ -758,11 +947,31 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
         print(f"  [SKIP] {source} trade has no price/size data - waiting for API polling: {market_name[:40]}")
         return
 
-    # Calculate our position size
-    our_size = min(
+    # Calculate our position size (with cumulative position limit check)
+    pos_key = f"{market_id}:{outcome}"
+    existing_position_value = Decimal(0)
+
+    if pos_key in ghost_state.positions:
+        existing_pos = ghost_state.positions[pos_key]
+        if existing_pos["status"] == "open" and existing_pos["size"] > 0:
+            # Calculate existing position value at current price
+            existing_position_value = existing_pos["size"] * price
+
+    # How much room is left before hitting max_position_usd for this market
+    remaining_capacity = max(Decimal(0), account.max_position_usd - existing_position_value)
+
+    # Calculate desired size based on ratio, but cap at remaining capacity
+    desired_size = min(
         usdc_size * account.position_ratio,
-        account.max_position_usd,
+        account.max_position_usd,  # Never exceed max in a single trade
     )
+    our_size = min(desired_size, remaining_capacity)
+
+    # Skip if we're already at max position
+    if our_size <= 0 and side == "BUY":
+        print(f"  [SKIP] Max position reached for {market_name[:40]} (${float(existing_position_value):.2f} >= ${float(account.max_position_usd):.2f})")
+        return
+
     our_shares = our_size / price if price > 0 else Decimal(0)
 
     # Create ghost trade record
@@ -782,6 +991,42 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
         detection_ms=detection_ms,
         true_latency_ms=true_latency_ms,
     )
+
+    # ===================================================================
+    # PRICE CHECK - Fetch REAL orderbook price FIRST for all trades
+    # ===================================================================
+    # We calculate slippage BEFORE any filters so filtered trades also
+    # have accurate slippage data for analysis and reporting.
+    token_id = trade.get('asset', '')
+
+    # Fetch the ACTUAL current best price from the orderbook
+    current_market_price = get_orderbook_price(token_id, side)
+
+    # If we couldn't get orderbook price, use target price with a warning
+    if current_market_price is None:
+        print(f"  [WARNING] Could not fetch orderbook for {token_id[:16]}..., using target price")
+        current_market_price = price
+
+    # Calculate actual slippage from target price to current market price
+    if side == "BUY":
+        # For BUY: slippage = (current_price - target_price) / target_price
+        # Positive slippage means price went UP (bad for us)
+        actual_slippage = (current_market_price - price) / price if price > 0 else Decimal(0)
+    else:
+        # For SELL: slippage = (target_price - current_price) / target_price
+        # Positive slippage means price went DOWN (bad for us)
+        actual_slippage = (price - current_market_price) / price if price > 0 else Decimal(0)
+
+    # Store slippage data on trade object - available for ALL trades including filtered ones
+    ghost_trade.our_price = current_market_price
+    ghost_trade.actual_slippage_pct = actual_slippage
+    # Calculate max allowed slippage for reference (even if not used for filtering)
+    _, _, max_allowed = account.is_slippage_acceptable(price, current_market_price)
+    ghost_trade.max_allowed_slippage_pct = max_allowed
+
+    # ===================================================================
+    # FILTERS - Check keyword, stoploss (slippage already calculated above)
+    # ===================================================================
 
     # Check keyword filter
     if not account.matches_keywords(market_name):
@@ -816,32 +1061,6 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
         return
 
     # ===================================================================
-    # PRICE CHECK - Fetch REAL orderbook price for accurate execution
-    # ===================================================================
-    # The token_id (asset) is what we need to look up the orderbook
-    token_id = trade.get('asset', '')
-
-    # Fetch the ACTUAL current best price from the orderbook
-    current_market_price = get_orderbook_price(token_id, side)
-
-    # If we couldn't get orderbook price, use target price with a warning
-    if current_market_price is None:
-        print(f"  [WARNING] Could not fetch orderbook for {token_id[:16]}..., using target price")
-        current_market_price = price
-
-    # Calculate actual slippage from target price to current market price
-    if side == "BUY":
-        # For BUY: slippage = (current_price - target_price) / target_price
-        # Positive slippage means price went UP (bad for us)
-        actual_slippage = (current_market_price - price) / price if price > 0 else Decimal(0)
-    else:
-        # For SELL: slippage = (target_price - current_price) / target_price
-        # Positive slippage means price went DOWN (bad for us)
-        actual_slippage = (price - current_market_price) / price if price > 0 else Decimal(0)
-
-    ghost_trade.our_price = current_market_price
-
-    # ===================================================================
     # LIMIT MODE: MUST get target price or BETTER, otherwise SKIP
     # ===================================================================
     if account.order_type == 'limit':
@@ -851,9 +1070,11 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
         price_ok = (side == "BUY" and current_market_price <= price) or \
                    (side == "SELL" and current_market_price >= price)
 
+        # For limit orders, max_allowed is N/A (we want exact price or better)
+        ghost_trade.max_allowed_slippage_pct = Decimal(0)
+
         if not price_ok:
             ghost_trade.status = 'filtered_limit'
-            ghost_trade.actual_slippage_pct = actual_slippage
             ghost_trade.total_ms = (time.perf_counter() - t_total_start) * 1000
             ghost_state.record_ghost_trade(ghost_trade)
 
@@ -872,17 +1093,14 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
             return
 
         # LIMIT order is good - we can get target price or better!
-        ghost_trade.actual_slippage_pct = actual_slippage
-        ghost_trade.max_allowed_slippage_pct = Decimal(0)  # N/A for limit orders
 
     # ===================================================================
     # MARKET MODE: Accept current price with slippage tolerance check
     # ===================================================================
     else:
         # For MARKET orders: Check if slippage is within acceptable range
-        is_acceptable, _, max_allowed = account.is_slippage_acceptable(price, current_market_price)
-        ghost_trade.actual_slippage_pct = actual_slippage
-        ghost_trade.max_allowed_slippage_pct = max_allowed
+        # (slippage values already calculated above, just check acceptability)
+        is_acceptable, _, _ = account.is_slippage_acceptable(price, current_market_price)
 
         if not is_acceptable:
             ghost_trade.status = 'filtered_slippage'
@@ -890,7 +1108,7 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
             ghost_state.record_ghost_trade(ghost_trade)
 
             slippage_pct_display = float(abs(actual_slippage) * 100)
-            max_pct_display = float(max_allowed * 100)
+            max_pct_display = float(ghost_trade.max_allowed_slippage_pct * 100) if ghost_trade.max_allowed_slippage_pct else 0
 
             await ws_broadcast({
                 "type": "ghost_trade",
@@ -985,18 +1203,36 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
             ghost_trade.api_error = None
             ghost_trade.status = 'live_executed'
 
+            # Record to P/L tracker for per-account profitability tracking
+            if ghost_state._pnl_tracker:
+                ghost_state._pnl_tracker.record_trade(
+                    trade_id=ghost_trade.id,
+                    source_account=account.name,
+                    market_id=market_id,
+                    token_id=trade.get('asset', ''),
+                    market_name=market_name,
+                    outcome=outcome,
+                    side=side,
+                    size=our_shares,
+                    entry_price=current_market_price,
+                    order_id=result.get("orderID"),
+                )
+
             print(f"  \033[32m[LIVE ORDER]\033[0m {side} ${float(our_size):.2f} @ {float(current_market_price):.4f} - {market_name[:40]}")
 
         except ImportError:
             ghost_trade.api_error = "py_clob_client not installed"
             ghost_trade.api_response = {"status": "error", "body": "Missing py_clob_client library"}
-            ghost_trade.status = 'live_error'
+            ghost_trade.status = 'live_error_setup'
             print(f"  \033[31m[LIVE ERROR]\033[0m py_clob_client not installed")
         except Exception as e:
-            ghost_trade.api_error = f"Live execution error: {str(e)[:200]}"
-            ghost_trade.api_response = {"status": "error", "body": str(e)[:500]}
-            ghost_trade.status = 'live_error'
-            print(f"  \033[31m[LIVE ERROR]\033[0m {str(e)[:80]}")
+            error_msg = str(e)
+            ghost_trade.api_error = f"Live execution error: {error_msg[:200]}"
+            ghost_trade.api_response = {"status": "error", "body": error_msg[:500]}
+            ghost_trade.status = classify_live_error(error_msg)
+            # Color-code by error type
+            error_type = ghost_trade.status.replace('live_error_', '').upper() if '_' in ghost_trade.status else 'UNKNOWN'
+            print(f"  \033[31m[LIVE ERROR: {error_type}]\033[0m {error_msg[:80]}")
 
     else:
         # GHOST EXECUTION - Simulate API call (will fail but shows timing)
@@ -1040,13 +1276,19 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
             "market_id": market_id,
             "market_name": market_name,
             "outcome": outcome,
+            "token_id": trade.get('asset', ''),  # Store token_id for price lookups
             "size": Decimal(0),
             "avg_price": Decimal(0),
+            "current_price": current_market_price,  # Track current market price
             "cost_basis": Decimal(0),
             "status": "open",
         }
 
     pos = ghost_state.positions[pos_key]
+    # Always update current price when we process a trade
+    pos["current_price"] = current_market_price
+    pos["token_id"] = trade.get('asset', '') or pos.get("token_id", "")
+
     if side == "BUY":
         # Deduct cost from simulated balance (at actual market price)
         cost = our_shares * current_market_price
@@ -1094,10 +1336,16 @@ async def process_new_trade(account: CopyTradeAccount, trade: dict, ws_broadcast
         "data": ghost_trade.to_dict(),
     })
 
-    # Update positions
+    # Update positions (use list() to avoid "dictionary changed size during iteration")
     open_positions = [
-        {**p, "size": float(p["size"]), "avg_price": float(p["avg_price"]), "cost_basis": float(p["cost_basis"])}
-        for p in ghost_state.positions.values()
+        {
+            **p,
+            "size": float(p["size"]),
+            "avg_price": float(p["avg_price"]),
+            "current_price": float(p.get("current_price", p["avg_price"])),
+            "cost_basis": float(p["cost_basis"]),
+        }
+        for p in list(ghost_state.positions.values())
         if p["status"] == "open"
     ]
     await ws_broadcast({
@@ -1249,16 +1497,21 @@ async def ghost_mode_monitor(ws_broadcast):
     # Initialize blockchain monitoring if configured
     if ghost_state.polygon_rpc_url and BLOCKCHAIN_AVAILABLE:
         print(f"\n  [BLOCKCHAIN MODE] Polygon RPC configured - enabling ~2-5s latency!")
-        print(f"  RPC: {ghost_state.polygon_rpc_url[:50]}...")
+        print(f"  Primary RPC: {ghost_state.polygon_rpc_url[:50]}...")
+        if ghost_state.verification_rpc_url:
+            print(f"  Verification RPC: configured (Alchemy - every 2.5 min)")
 
         # Collect all wallet addresses to monitor
         wallets = [acc.wallet for acc in ghost_state.accounts.values() if acc.enabled]
 
-        # Create blockchain monitor
+        # Create blockchain monitor with dual-RPC support
+        # Primary RPC (public/free) handles real-time polling
+        # Verification RPC (Alchemy) is optional, used for periodic verification only
         ghost_state._blockchain_monitor = PolygonMonitor(
             rpc_url=ghost_state.polygon_rpc_url,
             wallets=wallets,
             on_trade=lambda trade: _handle_blockchain_trade(trade, ws_broadcast),
+            verification_rpc_url=ghost_state.verification_rpc_url,
         )
 
         # Start the monitor
@@ -1279,10 +1532,14 @@ async def ghost_mode_monitor(ws_broadcast):
     print("="*70 + "\n")
 
     poll_interval = 1.0  # Poll every 1 second for faster detection
+    drawdown_check_interval = 60  # Check drawdowns every 60 seconds
+    loop_counter = 0
 
     while ghost_state.enabled:
         try:
-            for account in ghost_state.accounts.values():
+            # Use list() to create a snapshot - prevents "dictionary changed size during iteration"
+            # if accounts are added/removed via API while this loop is running
+            for account in list(ghost_state.accounts.values()):
                 if not account.enabled:
                     continue
 
@@ -1327,6 +1584,48 @@ async def ghost_mode_monitor(ws_broadcast):
 
             # Periodically cleanup resolved positions (15-min markets, etc.)
             ghost_state.cleanup_resolved_positions()
+
+            # Periodic tasks (every drawdown_check_interval seconds)
+            loop_counter += 1
+            if loop_counter >= drawdown_check_interval:
+                loop_counter = 0
+
+                # Refresh position prices for accurate P/L display
+                refresh_position_prices()
+
+                # Broadcast updated positions with fresh prices
+                open_positions = [
+                    {
+                        **p,
+                        "size": float(p["size"]),
+                        "avg_price": float(p["avg_price"]),
+                        "current_price": float(p.get("current_price", p["avg_price"])),
+                        "cost_basis": float(p["cost_basis"]),
+                    }
+                    for p in list(ghost_state.positions.values())
+                    if p["status"] == "open" and float(p["size"]) > 0
+                ]
+                if open_positions:
+                    await ws_broadcast({
+                        "type": "position_update",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "data": {
+                            "positions": open_positions,
+                            "count": len(open_positions),
+                            "ghost_mode": True,
+                        },
+                    })
+
+                # Check drawdowns
+                drawdown_results = ghost_state.update_account_drawdowns()
+                # Log any triggered drawdowns
+                for acc_id, info in drawdown_results.items():
+                    if info.get("just_triggered"):
+                        await ws_broadcast({
+                            "type": "drawdown_triggered",
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "data": info,
+                        })
 
             await asyncio.sleep(poll_interval)
 

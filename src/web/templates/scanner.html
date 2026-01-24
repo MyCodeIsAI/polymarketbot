@@ -1,0 +1,1701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - PolymarketBot</title>
+    <style>
+        :root {
+            --bg-primary: #0f0f0f;
+            --bg-secondary: #1a1a1a;
+            --bg-card: #222;
+            --text-primary: #fff;
+            --text-secondary: #aaa;
+            --accent: #00d4aa;
+            --critical: #ff4757;
+            --high: #ffa502;
+            --medium: #3498db;
+            --low: #2ecc71;
+            --border: #333;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Navigation */
+        .nav {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            padding: 15px 20px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+
+        .nav-brand {
+            font-size: 1.3em;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 15px;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            transition: all 0.2s;
+        }
+
+        .nav-links a:hover, .nav-links a.active {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 1.8em;
+            font-weight: 600;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.95em;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-primary { background: var(--accent); color: #000; }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-danger { background: var(--critical); color: #fff; }
+        .btn-secondary { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-warning { background: var(--high); color: #000; }
+        .btn-sm { padding: 6px 12px; font-size: 0.85em; }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .stat-card h3 {
+            color: var(--text-secondary);
+            font-size: 0.85em;
+            font-weight: 400;
+            margin-bottom: 8px;
+        }
+
+        .stat-card .value {
+            font-size: 2em;
+            font-weight: 600;
+        }
+
+        .stat-card .value.critical { color: var(--critical); }
+        .stat-card .value.high { color: var(--high); }
+        .stat-card .value.medium { color: var(--medium); }
+        .stat-card .value.accent { color: var(--accent); }
+
+        /* Main Section Tabs */
+        .section-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 20px;
+        }
+
+        .section-tab {
+            padding: 15px 30px;
+            cursor: pointer;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 1.1em;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .section-tab:first-child { border-radius: 8px 0 0 8px; }
+        .section-tab:last-child { border-radius: 0 8px 8px 0; border-left: none; }
+
+        .section-tab:hover { color: var(--text-primary); }
+
+        .section-tab.active {
+            background: var(--accent);
+            color: #000;
+            border-color: var(--accent);
+        }
+
+        .section-tab .badge {
+            background: rgba(255,255,255,0.2);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.8em;
+            margin-left: 8px;
+        }
+
+        .section-tab.active .badge {
+            background: rgba(0,0,0,0.2);
+        }
+
+        /* Sub Tabs */
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 12px 25px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+
+        .tab:hover { color: var(--text-primary); }
+
+        .tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        /* Tables */
+        .table-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+        }
+
+        th {
+            background: var(--bg-secondary);
+            font-weight: 500;
+            color: var(--text-secondary);
+            font-size: 0.85em;
+            text-transform: uppercase;
+        }
+
+        tr { border-bottom: 1px solid var(--border); }
+        tr:last-child { border-bottom: none; }
+        tr:hover { background: var(--bg-secondary); }
+
+        /* Priority badges */
+        .priority-badge {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .priority-badge.critical { background: rgba(255, 71, 87, 0.2); color: var(--critical); }
+        .priority-badge.high { background: rgba(255, 165, 2, 0.2); color: var(--high); }
+        .priority-badge.medium { background: rgba(52, 152, 219, 0.2); color: var(--medium); }
+        .priority-badge.low { background: rgba(46, 204, 113, 0.2); color: var(--low); }
+
+        /* Flag type badges */
+        .flag-badge {
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .flag-badge.sybil { background: rgba(255, 71, 87, 0.25); color: #ff4757; border: 1px solid rgba(255, 71, 87, 0.4); }
+        .flag-badge.insider { background: rgba(255, 165, 2, 0.25); color: #ffa502; border: 1px solid rgba(255, 165, 2, 0.4); }
+        .flag-badge.unknown { background: rgba(170, 170, 170, 0.2); color: #aaa; border: 1px solid rgba(170, 170, 170, 0.3); }
+        .flag-badge.documented { background: rgba(0, 212, 170, 0.25); color: var(--accent); border: 1px solid rgba(0, 212, 170, 0.4); }
+
+        /* Score bar */
+        .score-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .score-bar .bar {
+            flex: 1;
+            height: 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            overflow: hidden;
+            max-width: 100px;
+        }
+
+        .score-bar .bar .fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+
+        .score-bar .bar .fill.critical { background: var(--critical); }
+        .score-bar .bar .fill.high { background: var(--high); }
+        .score-bar .bar .fill.medium { background: var(--medium); }
+        .score-bar .bar .fill.low { background: var(--low); }
+
+        /* Wallet address */
+        .wallet-address {
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.9em;
+        }
+
+        .wallet-address a { color: var(--accent); text-decoration: none; }
+        .wallet-address a:hover { text-decoration: underline; }
+
+        /* Action buttons in table */
+        .table-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .table-actions button {
+            padding: 5px 10px;
+            font-size: 0.8em;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            cursor: pointer;
+        }
+
+        .table-actions button:hover { background: var(--border); }
+        .table-actions button.btn-probe { background: var(--high); color: #000; border-color: var(--high); }
+        .table-actions button.btn-probe:hover { opacity: 0.9; }
+
+        /* Filters */
+        .filters {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-group label {
+            color: var(--text-secondary);
+            font-size: 0.9em;
+        }
+
+        .filter-group select, .filter-group input {
+            padding: 8px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            color: var(--text-primary);
+            font-size: 0.9em;
+        }
+
+        /* Panel sections */
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .panel h2 {
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Status indicator */
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .status-dot.running { background: var(--accent); }
+        .status-dot.stopped { background: var(--critical); }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal.active { display: flex; }
+
+        .modal-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 { font-size: 1.3em; }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.5em;
+            cursor: pointer;
+        }
+
+        .modal-body { padding: 20px; }
+
+        .modal-footer {
+            padding: 15px 20px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 0.9em; }
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            color: var(--text-primary);
+            font-size: 0.95em;
+        }
+        .form-group textarea { min-height: 100px; resize: vertical; }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 50px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state h3 { margin-bottom: 10px; }
+
+        /* Hidden content panels */
+        .section-content { display: none; }
+        .section-content.active { display: block; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* Loading spinner */
+        .loading { text-align: center; padding: 40px; }
+        .spinner {
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Toast notifications */
+        .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 2000; }
+        .toast {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .toast.success { border-left: 3px solid var(--accent); }
+        .toast.error { border-left: 3px solid var(--critical); }
+        .toast.warning { border-left: 3px solid var(--high); }
+
+        /* Detail grid */
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .detail-item {
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: 5px;
+        }
+
+        .detail-item label { display: block; color: var(--text-secondary); font-size: 0.8em; margin-bottom: 5px; }
+        .detail-item .value { font-size: 1.1em; font-weight: 500; }
+
+        /* Linked info */
+        .linked-trader {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+            margin-top: 3px;
+        }
+
+        .linked-trader a { color: var(--accent); text-decoration: none; }
+        .linked-trader a:hover { text-decoration: underline; }
+
+        /* Dimension scores */
+        .dimension-scores {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .dimension {
+            text-align: center;
+            padding: 15px 10px;
+            background: var(--bg-secondary);
+            border-radius: 5px;
+        }
+
+        .dimension .name { font-size: 0.75em; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 5px; }
+        .dimension .score { font-size: 1.3em; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-brand">PolymarketBot</div>
+        <div class="nav-links">
+            <a href="/">Dashboard</a>
+            <a href="/discovery">Discovery</a>
+            <a href="/insider-scanner" class="active">Insider Scanner</a>
+            <a href="/infrastructure">Infrastructure</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>Insider Scanner</h1>
+            <div class="header-actions">
+                <div class="status-indicator">
+                    <div class="status-dot stopped" id="scannerStatus"></div>
+                    <span id="scannerStatusText">Stopped</span>
+                </div>
+                <button class="btn btn-primary" onclick="startScanner()">Start Scanner</button>
+                <button class="btn btn-danger" onclick="stopScanner()">Stop Scanner</button>
+            </div>
+        </div>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Insider Flags</h3>
+                <div class="value critical" id="statInsiderFlags">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Documented Insiders</h3>
+                <div class="value high" id="statDocumentedInsiders">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Insider Funding Sources</h3>
+                <div class="value high" id="statInsiderFunding">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Systematic Traders</h3>
+                <div class="value accent" id="statTraders">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Sybil Flags</h3>
+                <div class="value medium" id="statSybilFlags">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>High-Volume Excluded</h3>
+                <div class="value" id="statHighVolume">0</div>
+            </div>
+        </div>
+
+        <!-- Main Section Tabs -->
+        <div class="section-tabs">
+            <div class="section-tab active" data-section="insider">
+                Insider Detection <span class="badge" id="insiderBadge">0</span>
+            </div>
+            <div class="section-tab" data-section="systematic">
+                Systematic Traders <span class="badge" id="systematicBadge">0</span>
+            </div>
+        </div>
+
+        <!-- INSIDER DETECTION SECTION -->
+        <div class="section-content active" id="insider-section">
+            <div class="tabs">
+                <div class="tab active" data-tab="flagged">Flagged Wallets</div>
+                <div class="tab" data-tab="documented">Documented Insiders</div>
+                <div class="tab" data-tab="insider-funding">Insider Funding Sources</div>
+                <div class="tab" data-tab="audit">Audit Trail</div>
+            </div>
+
+            <!-- Flagged Wallets Tab -->
+            <div class="tab-content active" id="flagged-content">
+                <div class="filters">
+                    <div class="filter-group">
+                        <label>Type:</label>
+                        <select id="filterFlagType" onchange="loadWatchlist()">
+                            <option value="">All</option>
+                            <option value="insider">Insider Pattern</option>
+                            <option value="sybil">Insider Alt (Sybil)</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Priority:</label>
+                        <select id="filterPriority" onchange="loadWatchlist()">
+                            <option value="">All</option>
+                            <option value="critical">Critical</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Status:</label>
+                        <select id="filterStatus" onchange="loadWatchlist()">
+                            <option value="">All</option>
+                            <option value="new">New</option>
+                            <option value="monitoring">Monitoring</option>
+                            <option value="escalated">Escalated</option>
+                            <option value="confirmed">Confirmed</option>
+                            <option value="cleared">Cleared</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-secondary" onclick="openAddWalletModal()">+ Add Wallet</button>
+                    <button class="btn btn-secondary" onclick="loadWatchlist()">Refresh</button>
+                </div>
+
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Wallet</th>
+                                <th>Type</th>
+                                <th>Score</th>
+                                <th>Priority</th>
+                                <th>Status</th>
+                                <th>Signals</th>
+                                <th>Age</th>
+                                <th>Position</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="watchlistTable">
+                            <tr><td colspan="9"><div class="loading"><div class="spinner"></div>Loading...</div></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Documented Insiders Tab -->
+            <div class="tab-content" id="documented-content">
+                <div class="filters">
+                    <div class="filter-group">
+                        <label>Category:</label>
+                        <select id="filterDocCategory" onchange="loadDocumentedInsiders()">
+                            <option value="">All</option>
+                            <option value="military">Military</option>
+                            <option value="awards">Awards</option>
+                            <option value="corporate">Corporate</option>
+                            <option value="election">Election</option>
+                            <option value="government_policy">Government Policy</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadDocumentedInsiders()">Refresh</button>
+                    <span style="color: var(--text-secondary); margin-left: auto;" id="documentedCount">Loading...</span>
+                </div>
+
+                <div class="table-container" style="max-height: 600px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Wallet</th>
+                                <th>Username</th>
+                                <th>Category</th>
+                                <th>Profit</th>
+                                <th>Win Rate</th>
+                                <th>Signals</th>
+                                <th>Funding Source</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="documentedTable">
+                            <tr><td colspan="9"><div class="loading"><div class="spinner"></div>Loading...</div></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Insider Funding Sources Tab -->
+            <div class="tab-content" id="insider-funding-content">
+                <div class="panel">
+                    <h2>Check Insider Funding Source</h2>
+                    <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                        Check if a funding address is linked to a documented insider.
+                        This detects alt accounts created by known insider traders.
+                    </p>
+                    <div class="filters" style="flex-wrap: nowrap;">
+                        <div class="filter-group" style="flex: 1;">
+                            <label>Funding Address:</label>
+                            <input type="text" id="insiderFundingCheck" placeholder="0x..." style="flex: 1; min-width: 300px;">
+                        </div>
+                        <button class="btn btn-warning" onclick="checkInsiderFunding()">Check Address</button>
+                    </div>
+                    <div id="insiderFundingResult" style="margin-top: 20px;"></div>
+                </div>
+
+                <div class="panel">
+                    <h2>Monitored Insider Funding Sources</h2>
+                    <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                        These addresses funded documented insiders. New wallets from these sources should be flagged immediately.
+                    </p>
+                    <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Address</th>
+                                    <th>Type</th>
+                                    <th>Associated Insiders</th>
+                                    <th>Risk Level</th>
+                                    <th>Note</th>
+                                </tr>
+                            </thead>
+                            <tbody id="insiderFundingTable">
+                                <tr><td colspan="5"><div class="loading"><div class="spinner"></div>Loading...</div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audit Trail Tab -->
+            <div class="tab-content" id="audit-content">
+                <div class="panel">
+                    <h2>Chain Integrity</h2>
+                    <div id="chainVerification">
+                        <div class="loading"><div class="spinner"></div>Verifying chain integrity...</div>
+                    </div>
+                </div>
+                <div class="filters">
+                    <button class="btn btn-primary" onclick="exportAuditTrail()">Export Full Audit Trail</button>
+                    <button class="btn btn-secondary" onclick="verifyChain()">Verify Chain</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- SYSTEMATIC TRADERS SECTION -->
+        <div class="section-content" id="systematic-section">
+            <div class="tabs">
+                <div class="tab active" data-tab="sys-sybil">Sybil Check</div>
+                <div class="tab" data-tab="sys-funding">Funding Sources</div>
+                <div class="tab" data-tab="sys-traders">Known Traders</div>
+                <div class="tab" data-tab="sys-excluded">Excluded Sources</div>
+            </div>
+
+            <!-- Sybil Check Tab -->
+            <div class="tab-content active" id="sys-sybil-content">
+                <div class="panel">
+                    <h2>Check Funding Source (Systematic Trader Alt)</h2>
+                    <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                        Check if a funding address matches any known profitable trader's wallet.
+                        This detects when a new account is funded by someone who previously withdrew from a profitable trading wallet.
+                    </p>
+                    <div class="filters" style="flex-wrap: nowrap;">
+                        <div class="filter-group" style="flex: 1;">
+                            <label>Funding Address:</label>
+                            <input type="text" id="sybilCheckAddress" placeholder="0x..." style="flex: 1; min-width: 300px;">
+                        </div>
+                        <button class="btn btn-primary" onclick="checkSybilAddress()">Check Address</button>
+                    </div>
+                    <div id="sybilCheckResult" style="margin-top: 20px;"></div>
+                </div>
+
+                <div class="panel">
+                    <h2>High-Volume Source Threshold</h2>
+                    <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                        Sources that funded more than this many traders are excluded from sybil detection.
+                    </p>
+                    <div class="filters">
+                        <div class="filter-group">
+                            <label>Threshold:</label>
+                            <input type="number" id="thresholdInput" min="1" max="1000" value="10" style="width: 80px;">
+                        </div>
+                        <button class="btn btn-secondary" onclick="updateThreshold()">Update</button>
+                        <span id="thresholdStatus" style="color: var(--text-secondary); margin-left: 10px;"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Funding Sources Tab -->
+            <div class="tab-content" id="sys-funding-content">
+                <div class="filters">
+                    <div class="filter-group">
+                        <label>Min Traders:</label>
+                        <select id="filterMinTraders" onchange="loadFundingSources()">
+                            <option value="1">1+</option>
+                            <option value="2" selected>2+</option>
+                            <option value="3">3+</option>
+                            <option value="5">5+</option>
+                            <option value="10">10+</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Show Exchanges:</label>
+                        <select id="filterExchanges" onchange="loadFundingSources()">
+                            <option value="">All</option>
+                            <option value="false" selected>Hide Exchanges</option>
+                            <option value="true">Only Exchanges</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadFundingSources()">Refresh</button>
+                    <span style="color: var(--text-secondary); margin-left: auto;" id="fundingCount">Loading...</span>
+                </div>
+
+                <div class="table-container" style="max-height: 600px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Address</th>
+                                <th>Type</th>
+                                <th>Traders Funded</th>
+                                <th>Total Profit</th>
+                                <th>Labels</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fundingTable">
+                            <tr><td colspan="6"><div class="loading"><div class="spinner"></div>Loading...</div></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Known Traders Tab -->
+            <div class="tab-content" id="sys-traders-content">
+                <div class="filters">
+                    <div class="filter-group">
+                        <label>Min Profit:</label>
+                        <select id="filterMinProfit" onchange="loadKnownTraders()">
+                            <option value="">All</option>
+                            <option value="20000">$20k+</option>
+                            <option value="50000">$50k+</option>
+                            <option value="100000" selected>$100k+</option>
+                            <option value="500000">$500k+</option>
+                            <option value="1000000">$1M+</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadKnownTraders()">Refresh</button>
+                    <span style="color: var(--text-secondary); margin-left: auto;" id="tradersCount">Loading...</span>
+                </div>
+
+                <div class="table-container" style="max-height: 600px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Wallet</th>
+                                <th>Profit</th>
+                                <th>Funding Sources</th>
+                                <th>Withdrawal Dests</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tradersTable">
+                            <tr><td colspan="5"><div class="loading"><div class="spinner"></div>Loading...</div></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Excluded Sources Tab -->
+            <div class="tab-content" id="sys-excluded-content">
+                <div class="panel">
+                    <h2>High-Volume Sources (Auto-Excluded)</h2>
+                    <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                        These addresses funded too many traders - likely exchanges, OTC desks, or market makers.
+                    </p>
+                    <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Address</th>
+                                    <th>Type</th>
+                                    <th>Traders Funded</th>
+                                    <th>Total Profit</th>
+                                    <th>Labels</th>
+                                </tr>
+                            </thead>
+                            <tbody id="highVolumeTable">
+                                <tr><td colspan="5"><div class="loading"><div class="spinner"></div>Loading...</div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Wallet Modal -->
+    <div class="modal" id="addWalletModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Add Wallet to Watchlist</h2>
+                <button class="modal-close" onclick="closeModal('addWalletModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Wallet Address</label>
+                    <input type="text" id="newWalletAddress" placeholder="0x...">
+                </div>
+                <div class="form-group">
+                    <label>Priority</label>
+                    <select id="newWalletPriority">
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="critical">Critical</option>
+                        <option value="low">Low</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea id="newWalletNotes" placeholder="Optional notes..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="newWalletAutoScore" checked> Auto-score wallet</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addWalletModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="addWallet()">Add Wallet</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Wallet Detail Modal -->
+    <div class="modal" id="walletDetailModal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2>Wallet Details</h2>
+                <button class="modal-close" onclick="closeModal('walletDetailModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="walletDetailContent">
+                <div class="loading"><div class="spinner"></div>Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        const API_BASE = '/api/insider';
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStats();
+            setupSectionTabs();
+            setupTabs();
+            loadWatchlist();
+        });
+
+        // Section tabs (Insider Detection vs Systematic Traders)
+        function setupSectionTabs() {
+            document.querySelectorAll('.section-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const section = tab.dataset.section;
+                    document.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.querySelectorAll('.section-content').forEach(c => c.classList.remove('active'));
+                    document.getElementById(`${section}-section`).classList.add('active');
+
+                    // Load content for section
+                    if (section === 'insider') {
+                        loadWatchlist();
+                    } else if (section === 'systematic') {
+                        loadHighVolumeSources();
+                    }
+                });
+            });
+        }
+
+        // Sub-tabs within sections
+        function setupTabs() {
+            document.querySelectorAll('.tabs').forEach(tabContainer => {
+                tabContainer.querySelectorAll('.tab').forEach(tab => {
+                    tab.addEventListener('click', () => {
+                        const tabName = tab.dataset.tab;
+                        tabContainer.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                        tab.classList.add('active');
+
+                        // Find parent section and update content
+                        const section = tabContainer.closest('.section-content');
+                        section.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                        document.getElementById(`${tabName}-content`).classList.add('active');
+
+                        // Load content
+                        if (tabName === 'flagged') loadWatchlist();
+                        else if (tabName === 'documented') loadDocumentedInsiders();
+                        else if (tabName === 'insider-funding') loadInsiderFundingSources();
+                        else if (tabName === 'audit') verifyChain();
+                        else if (tabName === 'sys-sybil') loadHighVolumeSources();
+                        else if (tabName === 'sys-funding') loadFundingSources();
+                        else if (tabName === 'sys-traders') loadKnownTraders();
+                        else if (tabName === 'sys-excluded') loadHighVolumeSources();
+                    });
+                });
+            });
+        }
+
+        // Load stats
+        async function loadStats() {
+            try {
+                const [sybilResp, docResp, insiderFundingResp] = await Promise.all([
+                    fetch(`${API_BASE}/sybil/stats`),
+                    fetch(`${API_BASE}/documented-insiders`),
+                    fetch(`${API_BASE}/insider-funding-sources`),
+                ]);
+
+                if (sybilResp.ok) {
+                    const sybil = await sybilResp.json();
+                    document.getElementById('statTraders').textContent = sybil.known_profitable_traders || 0;
+                    document.getElementById('statSybilFlags').textContent = sybil.sybil_flagged_wallets || 0;
+                    document.getElementById('statHighVolume').textContent = sybil.high_volume_excluded || 0;
+                    document.getElementById('systematicBadge').textContent = sybil.sybil_flagged_wallets || 0;
+                }
+
+                if (docResp.ok) {
+                    const doc = await docResp.json();
+                    document.getElementById('statDocumentedInsiders').textContent = doc.total || 0;
+                }
+
+                if (insiderFundingResp.ok) {
+                    const funding = await insiderFundingResp.json();
+                    document.getElementById('statInsiderFunding').textContent = funding.total || 0;
+                }
+
+                // Get insider flags count
+                const watchlistResp = await fetch(`${API_BASE}/watchlist?flag_type=insider&limit=1`);
+                if (watchlistResp.ok) {
+                    const wallets = await watchlistResp.json();
+                    // We'd need a count endpoint, but for now estimate
+                }
+
+            } catch (err) {
+                console.error('Failed to load stats:', err);
+            }
+        }
+
+        // Load watchlist (flagged wallets)
+        async function loadWatchlist() {
+            const flagType = document.getElementById('filterFlagType').value;
+            const priority = document.getElementById('filterPriority').value;
+            const status = document.getElementById('filterStatus').value;
+            const tbody = document.getElementById('watchlistTable');
+
+            let url = `${API_BASE}/watchlist?limit=100`;
+            if (flagType) url += `&flag_type=${flagType}`;
+            if (priority) url += `&priority=${priority}`;
+            if (status) url += `&status=${status}`;
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><h3>No flagged wallets</h3></div></td></tr>';
+                    return;
+                }
+
+                const wallets = await response.json();
+                document.getElementById('statInsiderFlags').textContent = wallets.length;
+                document.getElementById('insiderBadge').textContent = wallets.length;
+
+                if (wallets.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><h3>No wallets match filters</h3></div></td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = wallets.map(w => `
+                    <tr>
+                        <td class="wallet-address">
+                            <a href="https://polygonscan.com/address/${w.wallet_address}" target="_blank">
+                                ${w.wallet_address.slice(0, 8)}...${w.wallet_address.slice(-6)}
+                            </a>
+                            ${w.flag_type === 'sybil' && w.funding_match_address ? `
+                                <div class="linked-trader">via <a href="https://polygonscan.com/address/${w.funding_match_address}" target="_blank">${w.funding_match_address.slice(0, 6)}...${w.funding_match_address.slice(-4)}</a></div>
+                            ` : ''}
+                        </td>
+                        <td><span class="flag-badge ${w.flag_type || 'unknown'}">${w.flag_type || 'unknown'}</span></td>
+                        <td>
+                            <div class="score-bar">
+                                <span>${w.insider_score.toFixed(1)}</span>
+                                <div class="bar"><div class="fill ${w.priority}" style="width: ${w.insider_score}%"></div></div>
+                            </div>
+                        </td>
+                        <td><span class="priority-badge ${w.priority}">${w.priority}</span></td>
+                        <td>${w.status}</td>
+                        <td>${w.signal_count} (${w.active_dimensions} dims)</td>
+                        <td>${w.account_age_days !== null ? w.account_age_days + 'd' : '-'}</td>
+                        <td>${w.total_position_usd ? '$' + formatNumber(w.total_position_usd) : '-'}</td>
+                        <td>
+                            <div class="table-actions">
+                                <button onclick="viewWallet(${w.id})">View</button>
+                                <button class="btn-probe" onclick="autoProbeWallet('${w.wallet_address}')" title="Probe & add to documented insiders">Probe</button>
+                            </div>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Failed to load watchlist:', err);
+                tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><h3>Error loading data</h3></div></td></tr>';
+            }
+        }
+
+        // Load documented insiders
+        async function loadDocumentedInsiders() {
+            const category = document.getElementById('filterDocCategory').value;
+            const tbody = document.getElementById('documentedTable');
+            const countEl = document.getElementById('documentedCount');
+
+            try {
+                const response = await fetch(`${API_BASE}/documented-insiders`);
+                if (!response.ok) {
+                    tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><h3>No documented insiders</h3></div></td></tr>';
+                    return;
+                }
+
+                const data = await response.json();
+                let insiders = data.insiders || [];
+
+                if (category) {
+                    insiders = insiders.filter(i => i.category === category);
+                }
+
+                countEl.textContent = `${insiders.length} insiders`;
+
+                if (insiders.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><h3>No documented insiders</h3></div></td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = insiders.map(i => `
+                    <tr>
+                        <td><span class="flag-badge documented">${i.id}</span></td>
+                        <td class="wallet-address">
+                            ${i.wallet_address ? `<a href="https://polygonscan.com/address/${i.wallet_address}" target="_blank">${i.wallet_address.slice(0, 8)}...${i.wallet_address.slice(-6)}</a>` : '<span style="color: var(--text-secondary)">Unknown</span>'}
+                        </td>
+                        <td>${i.username || '-'}</td>
+                        <td>${i.category || '-'}</td>
+                        <td style="color: var(--accent)">${i.documented_profit_usd ? '$' + formatNumber(i.documented_profit_usd) : '-'}</td>
+                        <td>${i.documented_win_rate ? (i.documented_win_rate * 100).toFixed(0) + '%' : '-'}</td>
+                        <td>${(i.signals || []).slice(0, 3).join(', ') || '-'}</td>
+                        <td class="wallet-address">
+                            ${i.funding_info?.funding_source ? `<a href="https://polygonscan.com/address/${i.funding_info.funding_source}" target="_blank">${i.funding_info.funding_source.slice(0, 6)}...${i.funding_info.funding_source.slice(-4)}</a>` : '-'}
+                        </td>
+                        <td>
+                            <div class="table-actions">
+                                <button onclick="viewDocumentedInsider('${i.id}')">View</button>
+                            </div>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Failed to load documented insiders:', err);
+                tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><h3>Error loading data</h3></div></td></tr>';
+            }
+        }
+
+        // Load insider funding sources
+        async function loadInsiderFundingSources() {
+            const tbody = document.getElementById('insiderFundingTable');
+
+            try {
+                const response = await fetch(`${API_BASE}/insider-funding-sources`);
+                if (!response.ok) {
+                    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>No insider funding sources</h3></div></td></tr>';
+                    return;
+                }
+
+                const data = await response.json();
+                const sources = data.sources || [];
+
+                if (sources.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>No insider funding sources monitored</h3><p>Probe flagged wallets to add their funding sources here.</p></div></td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = sources.map(s => `
+                    <tr>
+                        <td class="wallet-address">
+                            <a href="https://polygonscan.com/address/${s.address}" target="_blank">${s.address.slice(0, 10)}...${s.address.slice(-8)}</a>
+                        </td>
+                        <td>${s.type || 'insider_funding'}</td>
+                        <td>${(s.associated_insiders || []).join(', ')}</td>
+                        <td><span class="priority-badge ${s.risk_level}">${s.risk_level || 'critical'}</span></td>
+                        <td>${s.note || '-'}</td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Failed to load insider funding sources:', err);
+                tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>Error loading data</h3></div></td></tr>';
+            }
+        }
+
+        // Check insider funding source
+        async function checkInsiderFunding() {
+            const address = document.getElementById('insiderFundingCheck').value.trim().toLowerCase();
+            const resultDiv = document.getElementById('insiderFundingResult');
+
+            if (!address.match(/^0x[a-fA-F0-9]{40}$/)) {
+                resultDiv.innerHTML = '<div class="panel" style="border-left: 3px solid var(--critical);"><p style="color: var(--critical);">Invalid Ethereum address format.</p></div>';
+                return;
+            }
+
+            resultDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Checking...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/check-insider-funding?funding_address=${address}`);
+                const data = await response.json();
+
+                if (data.is_match) {
+                    resultDiv.innerHTML = `
+                        <div class="panel" style="border-left: 3px solid var(--critical);">
+                            <h3 style="color: var(--critical);">INSIDER FUNDING MATCH FOUND</h3>
+                            <div class="detail-grid" style="margin-top: 15px;">
+                                <div class="detail-item">
+                                    <label>Match Type</label>
+                                    <div class="value">${data.match_type}</div>
+                                </div>
+                                <div class="detail-item">
+                                    <label>Associated Insiders</label>
+                                    <div class="value">${(data.associated_insiders || []).join(', ')}</div>
+                                </div>
+                                <div class="detail-item">
+                                    <label>Risk Level</label>
+                                    <div class="value"><span class="priority-badge ${data.risk_level}">${data.risk_level}</span></div>
+                                </div>
+                                ${data.insider_profit ? `<div class="detail-item"><label>Insider Profit</label><div class="value" style="color: var(--accent);">$${formatNumber(data.insider_profit)}</div></div>` : ''}
+                            </div>
+                            <p style="margin-top: 15px; padding: 10px; background: var(--bg-secondary); border-radius: 5px;">
+                                <strong>Warning:</strong> A new wallet funded by this address is likely an alt account of a documented insider trader!
+                            </p>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="panel" style="border-left: 3px solid var(--accent);">
+                            <h3 style="color: var(--accent);">No Insider Match</h3>
+                            <p>This address is not linked to any documented insider traders.</p>
+                        </div>
+                    `;
+                }
+            } catch (err) {
+                resultDiv.innerHTML = `<div class="panel" style="border-left: 3px solid var(--critical);"><p style="color: var(--critical);">Error: ${err.message}</p></div>`;
+            }
+        }
+
+        // Auto-probe a wallet
+        async function autoProbeWallet(walletAddress) {
+            if (!confirm(`Probe wallet ${walletAddress.slice(0, 10)}...?\n\nThis will:\n1. Fetch full profile from Polymarket\n2. Extract funding sources\n3. Add to documented insiders\n4. Monitor funding sources for alts`)) {
+                return;
+            }
+
+            showToast('Probing wallet...', 'warning');
+
+            try {
+                const response = await fetch(`${API_BASE}/auto-probe/${walletAddress}`, { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(`Wallet probed and ${data.action} as insider ${data.insider_id}`, 'success');
+                    loadWatchlist();
+                    loadDocumentedInsiders();
+                    loadInsiderFundingSources();
+                    loadStats();
+                } else {
+                    showToast('Failed to probe wallet', 'error');
+                }
+            } catch (err) {
+                showToast(`Error: ${err.message}`, 'error');
+            }
+        }
+
+        // View documented insider
+        function viewDocumentedInsider(insiderId) {
+            window.open(`${API_BASE}/documented-insiders/${insiderId}`, '_blank');
+        }
+
+        // Load high-volume sources
+        async function loadHighVolumeSources() {
+            const tbody = document.getElementById('highVolumeTable');
+
+            try {
+                const response = await fetch(`${API_BASE}/sybil/high-volume-sources`);
+                if (!response.ok) {
+                    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>No high-volume sources</h3></div></td></tr>';
+                    return;
+                }
+
+                const data = await response.json();
+                if (!data.sources || data.sources.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>No high-volume sources</h3></div></td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.sources.map(s => `
+                    <tr>
+                        <td class="wallet-address"><a href="https://polygonscan.com/address/${s.address}" target="_blank">${s.address.slice(0, 10)}...${s.address.slice(-8)}</a></td>
+                        <td>${s.type || s.source_type || '-'}</td>
+                        <td>${s.funded_trader_count || s.received_from_count || 0}</td>
+                        <td>$${((s.total_profit_funded || s.total_profit_source || 0) / 1000000).toFixed(1)}M</td>
+                        <td>${(s.labels || []).join(', ') || '-'}</td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>Error loading data</h3></div></td></tr>';
+            }
+        }
+
+        // Sybil check
+        async function checkSybilAddress() {
+            const address = document.getElementById('sybilCheckAddress').value.trim().toLowerCase();
+            const resultDiv = document.getElementById('sybilCheckResult');
+
+            if (!address.match(/^0x[a-fA-F0-9]{40}$/)) {
+                resultDiv.innerHTML = '<div class="panel" style="border-left: 3px solid var(--critical);"><p style="color: var(--critical);">Invalid Ethereum address format.</p></div>';
+                return;
+            }
+
+            resultDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Checking...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/sybil/check`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_wallet_address: '0x0000000000000000000000000000000000000001', funding_address: address })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    resultDiv.innerHTML = `<div class="panel" style="border-left: 3px solid var(--critical);"><p style="color: var(--critical);">Error: ${err.detail || 'Unknown error'}</p></div>`;
+                    return;
+                }
+
+                const data = await response.json();
+
+                if (data.is_match) {
+                    resultDiv.innerHTML = `
+                        <div class="panel" style="border-left: 3px solid var(--critical);">
+                            <h3 style="color: var(--critical);">SYBIL MATCH FOUND</h3>
+                            <div class="detail-grid" style="margin-top: 15px;">
+                                <div class="detail-item"><label>Match Type</label><div class="value">${data.match_type}</div></div>
+                                <div class="detail-item"><label>Linked Trader</label><div class="value wallet-address"><a href="https://polygonscan.com/address/${data.linked_trader_wallet}" target="_blank">${data.linked_trader_wallet?.slice(0, 10)}...${data.linked_trader_wallet?.slice(-8)}</a></div></div>
+                                <div class="detail-item"><label>Trader Profit</label><div class="value" style="color: var(--accent);">$${(data.linked_trader_profit || 0).toLocaleString()}</div></div>
+                                <div class="detail-item"><label>Confidence</label><div class="value">${((data.confidence_score || 0) * 100).toFixed(0)}%</div></div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<div class="panel" style="border-left: 3px solid var(--accent);"><h3 style="color: var(--accent);">No Match Found</h3><p>This address is not linked to any known profitable trader.</p></div>`;
+                }
+            } catch (err) {
+                resultDiv.innerHTML = `<div class="panel" style="border-left: 3px solid var(--critical);"><p style="color: var(--critical);">Error: ${err.message}</p></div>`;
+            }
+        }
+
+        // Update threshold
+        async function updateThreshold() {
+            const threshold = parseInt(document.getElementById('thresholdInput').value);
+            const statusEl = document.getElementById('thresholdStatus');
+
+            if (isNaN(threshold) || threshold < 1 || threshold > 1000) {
+                statusEl.textContent = 'Invalid threshold (1-1000)';
+                statusEl.style.color = 'var(--critical)';
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/sybil/threshold`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ threshold })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    statusEl.textContent = `Updated! ${data.index_stats?.high_volume_excluded || 0} excluded.`;
+                    statusEl.style.color = 'var(--accent)';
+                    loadStats();
+                    loadHighVolumeSources();
+                } else {
+                    statusEl.textContent = 'Error updating';
+                    statusEl.style.color = 'var(--critical)';
+                }
+            } catch (err) {
+                statusEl.textContent = `Error: ${err.message}`;
+                statusEl.style.color = 'var(--critical)';
+            }
+        }
+
+        // Load funding sources
+        async function loadFundingSources() {
+            const tbody = document.getElementById('fundingTable');
+            const countEl = document.getElementById('fundingCount');
+            const minTraders = document.getElementById('filterMinTraders').value;
+            const showExchanges = document.getElementById('filterExchanges').value;
+
+            try {
+                let url = `${API_BASE}/sybil/funding-sources?limit=500`;
+                if (minTraders) url += `&min_traders=${minTraders}`;
+                if (showExchanges !== '') url += `&is_exchange=${showExchanges}`;
+
+                const response = await fetch(url);
+                if (!response.ok) {
+                    tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><h3>No funding sources</h3></div></td></tr>';
+                    countEl.textContent = '0 sources';
+                    return;
+                }
+
+                const sources = await response.json();
+                countEl.textContent = `${sources.length} sources`;
+
+                if (sources.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><h3>No sources match filters</h3></div></td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = sources.map(s => {
+                    const traderCount = s.funded_trader_count || (s.funded_trader_wallets?.length || 0);
+                    const totalProfit = s.total_profit_funded || 0;
+                    const profitDisplay = totalProfit >= 1000000 ? `$${(totalProfit / 1000000).toFixed(1)}M` : totalProfit >= 1000 ? `$${(totalProfit / 1000).toFixed(0)}K` : `$${totalProfit.toFixed(0)}`;
+
+                    return `
+                        <tr>
+                            <td class="wallet-address"><a href="https://polygonscan.com/address/${s.address}" target="_blank">${s.address.slice(0, 10)}...${s.address.slice(-8)}</a></td>
+                            <td>${s.source_type || 'eoa'}${s.is_exchange ? ' (Exchange)' : ''}</td>
+                            <td><strong>${traderCount}</strong></td>
+                            <td style="color: var(--accent)">${profitDisplay}</td>
+                            <td>${(s.labels || []).join(', ') || '-'}</td>
+                            <td><div class="table-actions"><button onclick="checkFromSource('${s.address}')">Check</button></div></td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><h3>Error loading data</h3></div></td></tr>';
+                countEl.textContent = 'Error';
+            }
+        }
+
+        function checkFromSource(address) {
+            document.getElementById('sybilCheckAddress').value = address;
+            document.querySelector('.section-tab[data-section="systematic"]').click();
+            setTimeout(() => checkSybilAddress(), 100);
+        }
+
+        // Load known traders
+        async function loadKnownTraders() {
+            const tbody = document.getElementById('tradersTable');
+            const countEl = document.getElementById('tradersCount');
+            const minProfit = document.getElementById('filterMinProfit').value;
+
+            try {
+                let url = `${API_BASE}/sybil/profitable-traders?limit=500`;
+                if (minProfit) url += `&min_profit=${minProfit}`;
+
+                const response = await fetch(url);
+                if (!response.ok) {
+                    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>No traders found</h3></div></td></tr>';
+                    countEl.textContent = '0 traders';
+                    return;
+                }
+
+                const traders = await response.json();
+                countEl.textContent = `${traders.length} traders`;
+
+                if (traders.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>No traders match filters</h3></div></td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = traders.map(t => {
+                    const profit = t.profit_usd || 0;
+                    const profitDisplay = profit >= 1000000 ? `$${(profit / 1000000).toFixed(2)}M` : profit >= 1000 ? `$${(profit / 1000).toFixed(1)}K` : `$${profit.toFixed(0)}`;
+
+                    return `
+                        <tr>
+                            <td class="wallet-address"><a href="https://polymarket.com/profile/${t.wallet_address}" target="_blank">${t.wallet_address.slice(0, 10)}...${t.wallet_address.slice(-8)}</a></td>
+                            <td style="color: var(--accent); font-weight: bold;">${profitDisplay}</td>
+                            <td>${t.funding_sources?.length || 0}</td>
+                            <td>${t.withdrawal_destinations?.length || 0}</td>
+                            <td><div class="table-actions"><button onclick="window.open('https://polymarket.com/profile/${t.wallet_address}', '_blank')">View</button></div></td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>Error loading data</h3></div></td></tr>';
+                countEl.textContent = 'Error';
+            }
+        }
+
+        // Verify chain
+        async function verifyChain() {
+            const container = document.getElementById('chainVerification');
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>Verifying...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/audit/verify`);
+                if (!response.ok) {
+                    container.innerHTML = '<div class="empty-state"><h3>No audit records</h3><p>Records are created when wallets are flagged.</p></div>';
+                    return;
+                }
+
+                const result = await response.json();
+                container.innerHTML = `
+                    <div class="detail-grid">
+                        <div class="detail-item"><label>Status</label><div class="value" style="color: ${result.valid ? 'var(--accent)' : 'var(--critical)'}">${result.valid ? 'VALID' : 'INVALID'}</div></div>
+                        <div class="detail-item"><label>Entries</label><div class="value">${result.entries_checked}</div></div>
+                    </div>
+                `;
+            } catch (err) {
+                container.innerHTML = '<div class="empty-state"><h3>No audit records</h3></div>';
+            }
+        }
+
+        // Export audit trail
+        async function exportAuditTrail() {
+            try {
+                const response = await fetch(`${API_BASE}/audit/export`);
+                const data = await response.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `audit_trail_${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('Audit trail exported', 'success');
+            } catch (err) {
+                showToast('Failed to export', 'error');
+            }
+        }
+
+        // View wallet details
+        async function viewWallet(walletId) {
+            openModal('walletDetailModal');
+            const content = document.getElementById('walletDetailContent');
+            content.innerHTML = '<div class="loading"><div class="spinner"></div>Loading...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/watchlist/${walletId}`);
+                const wallet = await response.json();
+
+                content.innerHTML = `
+                    <div class="detail-grid">
+                        <div class="detail-item"><label>Address</label><div class="value wallet-address"><a href="https://polygonscan.com/address/${wallet.wallet_address}" target="_blank">${wallet.wallet_address}</a></div></div>
+                        <div class="detail-item"><label>Type</label><div class="value"><span class="flag-badge ${wallet.flag_type || 'unknown'}">${wallet.flag_type || 'unknown'}</span></div></div>
+                        <div class="detail-item"><label>Score</label><div class="value" style="color: var(--${wallet.priority})">${wallet.insider_score.toFixed(2)}</div></div>
+                        <div class="detail-item"><label>Priority</label><div class="value"><span class="priority-badge ${wallet.priority}">${wallet.priority}</span></div></div>
+                        <div class="detail-item"><label>Status</label><div class="value">${wallet.status}</div></div>
+                        <div class="detail-item"><label>Account Age</label><div class="value">${wallet.account_age_days !== null ? wallet.account_age_days + ' days' : 'Unknown'}</div></div>
+                    </div>
+
+                    <h3 style="margin: 20px 0 15px;">Dimension Scores</h3>
+                    <div class="dimension-scores">
+                        <div class="dimension"><div class="name">Account</div><div class="score">${wallet.dimensions.account.toFixed(1)}</div><div class="name">/25</div></div>
+                        <div class="dimension"><div class="name">Trading</div><div class="score">${wallet.dimensions.trading.toFixed(1)}</div><div class="name">/35</div></div>
+                        <div class="dimension"><div class="name">Behavioral</div><div class="score">${wallet.dimensions.behavioral.toFixed(1)}</div><div class="name">/25</div></div>
+                        <div class="dimension"><div class="name">Contextual</div><div class="score">${wallet.dimensions.contextual.toFixed(1)}</div><div class="name">/20</div></div>
+                        <div class="dimension"><div class="name">Cluster</div><div class="score">${wallet.dimensions.cluster.toFixed(1)}</div><div class="name">/20</div></div>
+                    </div>
+
+                    ${wallet.signals && wallet.signals.length > 0 ? `
+                        <h3 style="margin: 20px 0 15px;">Signals (${wallet.signals.length})</h3>
+                        <div style="max-height: 200px; overflow-y: auto;">
+                            ${wallet.signals.map(s => `<div style="padding: 8px; background: var(--bg-secondary); border-radius: 4px; margin-bottom: 5px;"><strong>${s.signal_name || s.name}</strong> <span style="color: var(--text-secondary)">(${s.category})</span><span style="float: right; color: var(--accent)">+${s.weight}</span></div>`).join('')}
+                        </div>
+                    ` : ''}
+
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border);">
+                        <button class="btn btn-warning" onclick="autoProbeWallet('${wallet.wallet_address}'); closeModal('walletDetailModal');">
+                            Probe & Add to Documented Insiders
+                        </button>
+                    </div>
+                `;
+            } catch (err) {
+                content.innerHTML = '<div class="empty-state"><h3>Failed to load details</h3></div>';
+            }
+        }
+
+        // Add wallet
+        async function addWallet() {
+            const address = document.getElementById('newWalletAddress').value.trim();
+            const priority = document.getElementById('newWalletPriority').value;
+            const notes = document.getElementById('newWalletNotes').value.trim();
+            const autoScore = document.getElementById('newWalletAutoScore').checked;
+
+            if (!address.match(/^0x[a-fA-F0-9]{40}$/)) {
+                showToast('Invalid wallet address', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/watchlist`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wallet_address: address, priority, notes: notes || null, auto_score: autoScore })
+                });
+
+                if (response.ok) {
+                    showToast('Wallet added', 'success');
+                    closeModal('addWalletModal');
+                    loadWatchlist();
+                    loadStats();
+                } else {
+                    const err = await response.json();
+                    showToast(err.detail || 'Failed to add wallet', 'error');
+                }
+            } catch (err) {
+                showToast('Failed to add wallet', 'error');
+            }
+        }
+
+        // Scanner control
+        async function startScanner() {
+            try {
+                await fetch(`${API_BASE}/control/start`, { method: 'POST' });
+                showToast('Scanner started', 'success');
+                document.getElementById('scannerStatus').className = 'status-dot running';
+                document.getElementById('scannerStatusText').textContent = 'Running';
+            } catch (err) {
+                showToast('Failed to start scanner', 'error');
+            }
+        }
+
+        async function stopScanner() {
+            try {
+                await fetch(`${API_BASE}/control/stop`, { method: 'POST' });
+                showToast('Scanner stopped', 'success');
+                document.getElementById('scannerStatus').className = 'status-dot stopped';
+                document.getElementById('scannerStatusText').textContent = 'Stopped';
+            } catch (err) {
+                showToast('Failed to stop scanner', 'error');
+            }
+        }
+
+        // Modal helpers
+        function openModal(id) { document.getElementById(id).classList.add('active'); }
+        function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+        function openAddWalletModal() {
+            document.getElementById('newWalletAddress').value = '';
+            document.getElementById('newWalletPriority').value = 'medium';
+            document.getElementById('newWalletNotes').value = '';
+            document.getElementById('newWalletAutoScore').checked = true;
+            openModal('addWalletModal');
+        }
+
+        // Toast notifications
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+
+        // Utility
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toFixed(2);
+        }
+
+        // Close modals on outside click
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) modal.classList.remove('active');
+            });
+        });
+    </script>
+</body>
+</html>

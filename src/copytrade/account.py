@@ -62,8 +62,9 @@ class CopyTradeAccount:
 
     # Tracking
     last_seen_trade_id: Optional[str] = None
-    baseline_value: Optional[Decimal] = None  # Value when we started tracking
-    current_value: Optional[Decimal] = None
+    baseline_value: Optional[Decimal] = None  # P/L when we started tracking (for reference)
+    current_value: Optional[Decimal] = None  # Current total P/L from copying this account
+    peak_value: Optional[Decimal] = None  # High watermark - highest P/L achieved (for drawdown calc)
     open_positions_count: int = 0  # Track current open positions for max_concurrent
 
     def get_max_slippage_for_price(self, target_price: Decimal) -> Decimal:
@@ -112,21 +113,73 @@ class CopyTradeAccount:
                 return True
         return False
 
+    def update_pnl(self, new_pnl: Decimal) -> None:
+        """
+        Update the current P/L and track the high watermark.
+
+        Args:
+            new_pnl: Current total P/L (realized + unrealized) from copying this account
+        """
+        self.current_value = new_pnl
+
+        # Update peak if this is a new high
+        if self.peak_value is None or new_pnl > self.peak_value:
+            self.peak_value = new_pnl
+
+        # Set baseline on first update (for reference)
+        if self.baseline_value is None:
+            self.baseline_value = new_pnl
+
+    def get_drawdown_percent(self) -> Optional[Decimal]:
+        """
+        Calculate current drawdown from peak as a percentage.
+
+        Returns None if not enough data, otherwise returns drawdown %.
+        Positive values mean we're below the peak (losing).
+        """
+        if self.peak_value is None or self.current_value is None:
+            return None
+
+        if self.peak_value <= 0:
+            # If peak is 0 or negative, use absolute difference
+            if self.current_value < self.peak_value:
+                return abs(self.peak_value - self.current_value)
+            return Decimal("0")
+
+        # Drawdown = (peak - current) / peak * 100
+        # Positive = below peak, Negative = above peak (shouldn't happen if peak is updated)
+        drawdown = (self.peak_value - self.current_value) / self.peak_value * Decimal("100")
+        return max(Decimal("0"), drawdown)
+
     def check_drawdown(self) -> bool:
-        """Check if account has exceeded max drawdown. Returns True if stoploss should trigger."""
-        if self.baseline_value is None or self.current_value is None:
+        """
+        Check if account has exceeded max drawdown from peak (high watermark).
+
+        Uses the peak P/L (highest value achieved) as the reference point,
+        NOT the starting/baseline value. This is the standard way to calculate
+        drawdown in trading systems.
+
+        Returns True if stoploss should trigger.
+        """
+        if self.peak_value is None or self.current_value is None:
             return False
 
-        if self.baseline_value <= 0:
+        # Calculate drawdown from peak
+        drawdown = self.get_drawdown_percent()
+        if drawdown is None:
             return False
-
-        drawdown = (self.baseline_value - self.current_value) / self.baseline_value * 100
 
         if drawdown >= self.max_drawdown_percent:
             self.stoploss_triggered = True
             return True
 
         return False
+
+    def reset_stoploss(self) -> None:
+        """Reset stoploss state (use after adding more funds or manual override)."""
+        self.stoploss_triggered = False
+        # Don't reset peak_value - that stays as the historical high
+        # User can manually reset peak by setting peak_value = current_value
 
     def to_dict(self) -> dict:
         """Convert account to dictionary for API/serialization."""
@@ -150,6 +203,8 @@ class CopyTradeAccount:
             "stoploss_triggered": self.stoploss_triggered,
             "baseline_value": str(self.baseline_value) if self.baseline_value else None,
             "current_value": str(self.current_value) if self.current_value else None,
+            "peak_value": str(self.peak_value) if self.peak_value else None,
+            "drawdown_percent": float(self.get_drawdown_percent()) if self.get_drawdown_percent() is not None else None,
             # Advanced risk settings
             "take_profit_pct": float(self.take_profit_pct),
             "stop_loss_pct": float(self.stop_loss_pct),
@@ -164,7 +219,7 @@ class CopyTradeAccount:
     @classmethod
     def from_dict(cls, data: dict) -> "CopyTradeAccount":
         """Create account from dictionary."""
-        return cls(
+        account = cls(
             id=data['id'],
             name=data['name'],
             wallet=data.get('wallet', data.get('target_wallet', '')),
@@ -184,3 +239,11 @@ class CopyTradeAccount:
             cooldown_seconds=int(data.get('cooldown_seconds', 10)),
             order_type=data.get('order_type', 'market'),
         )
+        # Load P/L tracking values if present
+        if data.get('baseline_value'):
+            account.baseline_value = Decimal(str(data['baseline_value']))
+        if data.get('current_value'):
+            account.current_value = Decimal(str(data['current_value']))
+        if data.get('peak_value'):
+            account.peak_value = Decimal(str(data['peak_value']))
+        return account

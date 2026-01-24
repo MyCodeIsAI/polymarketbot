@@ -13,6 +13,7 @@ class PolymarketDashboard {
         this.ghostModeEnabled = false;
         this.accounts = [];
         this.trades = [];
+        this.accountsPnL = {};  // P/L data keyed by account ID
 
         this.init();
     }
@@ -313,7 +314,7 @@ class PolymarketDashboard {
     async loadInitialData() {
         try {
             // Load data in parallel
-            const [status, positions, trades, accounts, health, pnl, stats] = await Promise.all([
+            const [status, positions, trades, accounts, health, pnl, stats, accountsPnL] = await Promise.all([
                 this.apiCall('/status'),
                 this.apiCall('/positions'),
                 this.apiCall('/trades?limit=20'),
@@ -321,11 +322,13 @@ class PolymarketDashboard {
                 this.apiCall('/health'),
                 this.apiCall('/pnl'),
                 this.apiCall('/trades/stats'),
+                this.apiCall('/accounts/pnl').catch(() => ({})),  // P/L tracking may not be enabled
             ]);
 
             this.updateStatus(status);
             this.updatePositions(positions);
             this.updateTrades(trades);
+            this.updateAccountsPnL(accountsPnL);  // Update P/L before accounts so it's available
             this.updateAccounts(accounts);
             this.updateHealth(health);
             this.updatePnL(pnl);
@@ -508,13 +511,11 @@ class PolymarketDashboard {
                     <td class="px-6 py-4">
                         <span class="${pos.outcome === 'Up' || pos.outcome === 'Yes' ? 'side-buy' : 'side-sell'}">${pos.outcome}</span>
                     </td>
-                    <td class="px-6 py-4">${this.formatNumber(size)}</td>
+                    <td class="px-6 py-4" title="${size.toFixed(2)} shares">${this.formatNumber(size)}</td>
+                    <td class="px-6 py-4">${this.formatUSD(currentValue)}</td>
                     <td class="px-6 py-4">${this.formatPrice(avgPrice)}</td>
                     <td class="px-6 py-4">${this.formatPrice(currentPrice)}</td>
                     <td class="px-6 py-4 ${pnlClass}">${this.formatUSD(pnl)}</td>
-                    <td class="px-6 py-4">
-                        <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${pos.status || 'open'}</span>
-                    </td>
                 </tr>
             `;
         }).join('');
@@ -576,6 +577,24 @@ class PolymarketDashboard {
             const apiStatus = trade.api_response?.status || trade.api_error || '';
             const apiTitle = trade.order_params ? `Order: ${JSON.stringify(trade.order_params, null, 2)}` : '';
 
+            // Human-readable status display
+            const statusDisplayMap = {
+                'live_executed': 'executed',
+                'live_error': 'error',
+                'live_error_balance': 'no balance',
+                'live_error_rejected': 'rejected',
+                'live_error_rate_limit': 'rate limited',
+                'live_error_network': 'network error',
+                'live_error_auth': 'auth error',
+                'live_error_setup': 'setup error',
+                'filtered_keyword': 'filtered',
+                'filtered_stoploss': 'stoploss',
+                'filtered_slippage': 'slippage',
+                'would_execute': 'ghost',
+                'api_simulated': 'simulated',
+            };
+            const statusDisplay = statusDisplayMap[status] || status;
+
             return `
                 <tr class="hover:bg-gray-750" title="${apiTitle.replace(/"/g, '&quot;')}">
                     <td class="px-6 py-4 text-sm">${this.formatTime(trade.detected_at || trade.timestamp)}</td>
@@ -588,7 +607,7 @@ class PolymarketDashboard {
                     <td class="px-6 py-4">${this.formatPrice(trade.our_price || trade.execution_price || trade.price || trade.target_price)}</td>
                     <td class="px-6 py-4 ${slippageClass}">${slippage.toFixed(2)}%</td>
                     <td class="px-6 py-4">
-                        <span class="px-2 py-1 text-xs rounded-full ${statusClass}" title="API: ${apiStatus}">${status}</span>
+                        <span class="px-2 py-1 text-xs rounded-full ${statusClass}" title="${status}: ${apiStatus}">${statusDisplay}</span>
                     </td>
                 </tr>
             `;
@@ -606,6 +625,33 @@ class PolymarketDashboard {
             const message = `${trade.side} ${trade.target_size} @ ${this.formatPrice(trade.execution_price)}`;
             this.showToast('success', `Trade executed: ${message}`);
         }
+    }
+
+    updateAccountsPnL(pnlData) {
+        // Store P/L data keyed by account ID
+        this.accountsPnL = {};
+        if (pnlData && pnlData.accounts) {
+            for (const [accountId, data] of Object.entries(pnlData.accounts)) {
+                this.accountsPnL[accountId] = data;
+            }
+        }
+    }
+
+    formatPnL(value) {
+        if (value === null || value === undefined) return '--';
+        const num = parseFloat(value);
+        const formatted = Math.abs(num).toFixed(2);
+        if (num > 0) return `+$${formatted}`;
+        if (num < 0) return `-$${formatted}`;
+        return `$${formatted}`;
+    }
+
+    getPnLClass(value) {
+        if (value === null || value === undefined) return 'text-gray-400';
+        const num = parseFloat(value);
+        if (num > 0) return 'text-green-400';
+        if (num < 0) return 'text-red-400';
+        return 'text-gray-400';
     }
 
     updateAccounts(accounts) {
@@ -632,6 +678,23 @@ class PolymarketDashboard {
             const stoplossStatus = account.stoploss_triggered
                 ? '<span class="text-red-400 text-xs">STOPLOSS</span>'
                 : '';
+
+            // Get P/L data for this account
+            const pnl = this.accountsPnL[account.id] || {};
+            const hasPnL = pnl.total_trades > 0;
+            const totalPnL = hasPnL ? pnl.total_pnl : null;
+            const winRate = hasPnL ? pnl.win_rate : null;
+            const tradeCount = hasPnL ? pnl.total_trades : 0;
+
+            // P/L display section
+            const pnlSection = hasPnL ? `
+                <div class="col-span-2 mt-1 pt-1 border-t border-gray-600">
+                    <div class="flex justify-between items-center">
+                        <span class="font-medium ${this.getPnLClass(totalPnL)}">${this.formatPnL(totalPnL)}</span>
+                        <span class="text-gray-500">${tradeCount} trades${winRate !== null ? ` · ${(winRate * 100).toFixed(0)}% win` : ''}</span>
+                    </div>
+                </div>
+            ` : '';
 
             return `
                 <div class="account-card ${enabledClass} p-4 bg-gray-750 rounded-lg mb-2">
@@ -675,6 +738,7 @@ class PolymarketDashboard {
                             </button>
                         </div>
                         <div class="col-span-2 truncate" title="${keywords}">Keywords: ${keywords.substring(0, 30)}${keywords.length > 30 ? '...' : ''}</div>
+                        ${pnlSection}
                     </div>
                 </div>
             `;

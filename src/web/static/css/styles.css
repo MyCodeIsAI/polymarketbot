@@ -107,6 +107,61 @@
     color: #60a5fa;
 }
 
+/* Ghost mode statuses */
+.trade-would_execute,
+.trade-api_simulated {
+    background-color: #4c1d95;
+    color: #c4b5fd;
+}
+
+.trade-live_executed {
+    background-color: #065f46;
+    color: #34d399;
+}
+
+.trade-filtered_keyword,
+.trade-filtered_stoploss,
+.trade-filtered_slippage {
+    background-color: #374151;
+    color: #9ca3af;
+}
+
+/* Live error statuses - specific types */
+.trade-live_error {
+    background-color: #7f1d1d;
+    color: #f87171;
+}
+
+.trade-live_error_balance {
+    background-color: #78350f;
+    color: #fbbf24;
+}
+
+.trade-live_error_rejected {
+    background-color: #7f1d1d;
+    color: #fca5a5;
+}
+
+.trade-live_error_rate_limit {
+    background-color: #4c1d95;
+    color: #c4b5fd;
+}
+
+.trade-live_error_network {
+    background-color: #1e3a5f;
+    color: #93c5fd;
+}
+
+.trade-live_error_auth {
+    background-color: #581c87;
+    color: #e879f9;
+}
+
+.trade-live_error_setup {
+    background-color: #374151;
+    color: #f87171;
+}
+
 /* Position status */
 .position-synced {
     background-color: #065f46;
