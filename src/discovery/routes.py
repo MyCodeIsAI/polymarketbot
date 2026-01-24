@@ -1190,7 +1190,7 @@ async def get_insider_suspects(
     import json
     from pathlib import Path
 
-    data_file = DATA_DIR / "insider_probe_results.json")
+    data_file = DATA_DIR / "insider_probe_results.json"
 
     if not data_file.exists():
         return {
@@ -1338,7 +1338,7 @@ async def get_preset_cache_info():
     helping users decide whether to use cache or run a new scan.
     """
     return {
-        "mass_scan": _get_cache_info(str(DATA_DIR / "analyzed_accounts.json"),
+        "mass_scan": _get_cache_info(str(DATA_DIR / "analyzed_accounts.json")),
         "insider_probe": _get_cache_info(str(DATA_DIR / "insider_probe_results.json")),
     }
 
@@ -1407,7 +1407,7 @@ async def run_mass_scan_preset(
 
     async def run_scan():
         try:
-            script_path = SCRIPTS_DIR / "mass_scan.py")
+            script_path = SCRIPTS_DIR / "mass_scan.py"
             if not script_path.exists():
                 _preset_scans[scan_id]["status"] = "error"
                 _preset_scans[scan_id]["error"] = "mass_scan.py not found"
@@ -1469,7 +1469,7 @@ async def run_insider_probe_preset(
     import json
     from pathlib import Path
 
-    result_file = DATA_DIR / "insider_probe_results.json")
+    result_file = DATA_DIR / "insider_probe_results.json"
     scan_id = f"insider_probe_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     def _count_flagged(data: dict) -> int:
@@ -1525,7 +1525,7 @@ async def run_insider_probe_preset(
 
     async def run_probe():
         try:
-            script_path = SCRIPTS_DIR / "insider_probe.py")
+            script_path = SCRIPTS_DIR / "insider_probe.py"
             if not script_path.exists():
                 _preset_scans[scan_id]["status"] = "error"
                 _preset_scans[scan_id]["error"] = "insider_probe.py not found"
@@ -1612,7 +1612,7 @@ async def get_insider_probe_results(
     import json
     from pathlib import Path
 
-    result_file = DATA_DIR / "insider_probe_results.json")
+    result_file = DATA_DIR / "insider_probe_results.json"
     if not result_file.exists():
         return {"results": [], "total": 0, "message": "No probe results found. Run an insider probe first."}
 
@@ -1849,7 +1849,7 @@ def _save_user_prefs():
     from pathlib import Path
     from datetime import datetime
 
-    prefs_file = DATA_DIR / "user_prefs.json")
+    prefs_file = DATA_DIR / "user_prefs.json"
 
     # Only save if there's actual data to save
     if not _watchlist and not _dismissed:
@@ -1875,7 +1875,7 @@ def _load_user_prefs():
     import json
     from pathlib import Path
 
-    prefs_file = DATA_DIR / "user_prefs.json")
+    prefs_file = DATA_DIR / "user_prefs.json"
 
     # Try new unified prefs file first
     if prefs_file.exists():
@@ -1913,7 +1913,7 @@ def _load_user_prefs():
             logger.error("user_prefs_load_error", error=str(e))
 
     # Fall back to old watchlist.json for migration
-    watchlist_file = DATA_DIR / "watchlist.json")
+    watchlist_file = DATA_DIR / "watchlist.json"
     if watchlist_file.exists():
         try:
             with open(watchlist_file) as f:
