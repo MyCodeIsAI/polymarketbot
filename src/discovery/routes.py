@@ -1081,7 +1081,7 @@ async def get_analyzed_accounts(
     import json
     from pathlib import Path
 
-    data_file = DATA_DIR / "analyzed_accounts.json")
+    data_file = DATA_DIR / "analyzed_accounts.json"
 
     if not data_file.exists():
         return {
@@ -1338,7 +1338,7 @@ async def get_preset_cache_info():
     helping users decide whether to use cache or run a new scan.
     """
     return {
-        "mass_scan": _get_cache_info(str(DATA_DIR / "analyzed_accounts.json")),
+        "mass_scan": _get_cache_info(str(DATA_DIR / "analyzed_accounts.json"),
         "insider_probe": _get_cache_info(str(DATA_DIR / "insider_probe_results.json")),
     }
 
@@ -1359,7 +1359,7 @@ async def run_mass_scan_preset(
     import json
     from pathlib import Path
 
-    result_file = DATA_DIR / "analyzed_accounts.json")
+    result_file = DATA_DIR / "analyzed_accounts.json"
     scan_id = f"mass_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     # Handle cache mode
@@ -1662,7 +1662,7 @@ async def get_mass_scan_results(
     import json
     from pathlib import Path
 
-    result_file = DATA_DIR / "analyzed_accounts.json")
+    result_file = DATA_DIR / "analyzed_accounts.json"
     if not result_file.exists():
         return {"results": [], "total": 0, "message": "No scan results found. Run a mass scan first."}
 
@@ -1717,7 +1717,7 @@ async def add_to_watchlist(wallet: str, notes: str = ""):
     wallet = wallet.lower()
 
     # Get account data from analyzed accounts if available
-    data_file = DATA_DIR / "analyzed_accounts.json")
+    data_file = DATA_DIR / "analyzed_accounts.json"
     account_data = None
 
     if data_file.exists():
@@ -1942,7 +1942,7 @@ async def get_analyzed_stats():
     import json
     from pathlib import Path
 
-    data_file = DATA_DIR / "analyzed_accounts.json")
+    data_file = DATA_DIR / "analyzed_accounts.json"
 
     if not data_file.exists():
         return {"error": "Analyzed accounts data not found"}
@@ -2046,7 +2046,7 @@ async def fetch_more_trades(request: FetchMoreTradesRequest):
     limit = request.limit
 
     # Get current account data
-    data_file = DATA_DIR / "analyzed_accounts.json")
+    data_file = DATA_DIR / "analyzed_accounts.json"
     if not data_file.exists():
         raise HTTPException(status_code=404, detail="No analyzed accounts found")
 

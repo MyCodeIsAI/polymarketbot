@@ -22,10 +22,15 @@ import asyncio
 import json
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Optional, Any, Callable
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# Project root - works on both local dev and VPS
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+DATA_DIR = PROJECT_ROOT / "data"
 from sqlalchemy import select, func
 
 from ..api.data import DataAPIClient
@@ -583,7 +588,7 @@ class DiscoveryService:
     def _save_checkpoint_to_file(self, checkpoint_data: dict) -> None:
         """Save checkpoint to JSON file for crash recovery."""
         from pathlib import Path
-        checkpoint_file = Path("/home/user/Documents/polymarketbot/data/scan_checkpoint.json")
+        checkpoint_file = DATA_DIR / "scan_checkpoint.json"
         checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -598,7 +603,7 @@ class DiscoveryService:
     def load_checkpoint_from_file() -> Optional[dict]:
         """Load checkpoint from file for resume."""
         from pathlib import Path
-        checkpoint_file = Path("/home/user/Documents/polymarketbot/data/scan_checkpoint.json")
+        checkpoint_file = DATA_DIR / "scan_checkpoint.json"
 
         if not checkpoint_file.exists():
             return None
@@ -617,7 +622,7 @@ class DiscoveryService:
     def clear_checkpoint_file() -> None:
         """Clear the checkpoint file after successful completion."""
         from pathlib import Path
-        checkpoint_file = Path("/home/user/Documents/polymarketbot/data/scan_checkpoint.json")
+        checkpoint_file = DATA_DIR / "scan_checkpoint.json"
         if checkpoint_file.exists():
             checkpoint_file.unlink()
             logger.info("checkpoint_file_cleared")
