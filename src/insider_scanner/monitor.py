@@ -318,10 +318,12 @@ class RealTimeMonitor:
             token_ids = await self._get_high_risk_token_ids()
 
             if token_ids:
-                # Subscribe to market channel with specific asset IDs
+                # Subscribe to market channel with specific token IDs
+                # Polymarket CLOB WS expects: {"type": "subscribe", "channel": "market", "markets": [...]}
                 await self._ws_client.subscribe({
-                    "type": "MARKET",
-                    "asset_ids": token_ids,
+                    "type": "subscribe",
+                    "channel": "market",
+                    "markets": token_ids,
                 })
                 logger.info("ws_subscribed", token_count=len(token_ids))
             else:
