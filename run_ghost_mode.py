@@ -1128,6 +1128,47 @@ async def run_dashboard(port: int = DEFAULT_PORT):
             print("  [LIVE] Starting in monitoring-only mode...")
             await start_ghost_monitor()
 
+        # Auto-start the insider scanner
+        await auto_start_scanner()
+
+    async def auto_start_scanner():
+        """Auto-start the insider scanner service."""
+        auto_start = os.getenv("AUTO_START_SCANNER", "true").lower() in ("true", "1", "yes")
+        if not auto_start:
+            print("  [SCANNER] Auto-start disabled via AUTO_START_SCANNER env")
+            return
+
+        try:
+            from src.web.api.insider_routes import _get_or_create_scanner
+            from src.web.api.dependencies import get_db
+            from src.insider_scanner.scanner_service import ScannerMode
+
+            # Get database manager and create session factory
+            db_manager = get_db()
+
+            from contextlib import contextmanager
+            @contextmanager
+            def session_factory():
+                with db_manager.session() as session:
+                    yield session
+
+            scanner = await _get_or_create_scanner(session_factory)
+
+            if not scanner.is_running:
+                mode = os.getenv("SCANNER_MODE", "full").lower()
+                scanner_mode = ScannerMode.FULL if mode == "full" else (
+                    ScannerMode.SYBIL_ONLY if mode == "sybil" else ScannerMode.INSIDER_ONLY
+                )
+
+                success = await scanner.start(mode=scanner_mode)
+                if success:
+                    print(f"  [SCANNER] Auto-started in {scanner_mode.value} mode")
+                else:
+                    print("  [SCANNER] WARNING: Auto-start failed")
+
+        except Exception as e:
+            print(f"  [SCANNER] Auto-start error: {e}")
+
     try:
         # Start server AND auto-start live mode
         await asyncio.gather(
