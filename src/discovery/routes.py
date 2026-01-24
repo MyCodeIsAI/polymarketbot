@@ -10,8 +10,10 @@ Provides endpoints for:
 
 import asyncio
 import re
+import sys
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -25,6 +27,11 @@ from .models import DiscoveryMode, ScanStatus
 from .service import DiscoveryService, ScanConfig, ScanProgress
 
 logger = get_logger(__name__)
+
+# Project root - works on both local dev and VPS
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+DATA_DIR = PROJECT_ROOT / "data"
+SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
@@ -1074,7 +1081,7 @@ async def get_analyzed_accounts(
     import json
     from pathlib import Path
 
-    data_file = Path("/home/user/Documents/polymarketbot/data/analyzed_accounts.json")
+    data_file = DATA_DIR / "analyzed_accounts.json")
 
     if not data_file.exists():
         return {
@@ -1183,7 +1190,7 @@ async def get_insider_suspects(
     import json
     from pathlib import Path
 
-    data_file = Path("/home/user/Documents/polymarketbot/data/insider_probe_results.json")
+    data_file = DATA_DIR / "insider_probe_results.json")
 
     if not data_file.exists():
         return {
@@ -1331,8 +1338,8 @@ async def get_preset_cache_info():
     helping users decide whether to use cache or run a new scan.
     """
     return {
-        "mass_scan": _get_cache_info("/home/user/Documents/polymarketbot/data/analyzed_accounts.json"),
-        "insider_probe": _get_cache_info("/home/user/Documents/polymarketbot/data/insider_probe_results.json"),
+        "mass_scan": _get_cache_info(str(DATA_DIR / "analyzed_accounts.json")),
+        "insider_probe": _get_cache_info(str(DATA_DIR / "insider_probe_results.json")),
     }
 
 
@@ -1352,7 +1359,7 @@ async def run_mass_scan_preset(
     import json
     from pathlib import Path
 
-    result_file = Path("/home/user/Documents/polymarketbot/data/analyzed_accounts.json")
+    result_file = DATA_DIR / "analyzed_accounts.json")
     scan_id = f"mass_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     # Handle cache mode
@@ -1400,7 +1407,7 @@ async def run_mass_scan_preset(
 
     async def run_scan():
         try:
-            script_path = Path("/home/user/Documents/polymarketbot/scripts/mass_scan.py")
+            script_path = SCRIPTS_DIR / "mass_scan.py")
             if not script_path.exists():
                 _preset_scans[scan_id]["status"] = "error"
                 _preset_scans[scan_id]["error"] = "mass_scan.py not found"
@@ -1412,7 +1419,7 @@ async def run_mass_scan_preset(
             # Run the script
             process = await asyncio.create_subprocess_exec(
                 "python3", str(script_path),
-                cwd="/home/user/Documents/polymarketbot",
+                cwd=str(PROJECT_ROOT),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -1462,7 +1469,7 @@ async def run_insider_probe_preset(
     import json
     from pathlib import Path
 
-    result_file = Path("/home/user/Documents/polymarketbot/data/insider_probe_results.json")
+    result_file = DATA_DIR / "insider_probe_results.json")
     scan_id = f"insider_probe_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     def _count_flagged(data: dict) -> int:
@@ -1518,7 +1525,7 @@ async def run_insider_probe_preset(
 
     async def run_probe():
         try:
-            script_path = Path("/home/user/Documents/polymarketbot/scripts/insider_probe.py")
+            script_path = SCRIPTS_DIR / "insider_probe.py")
             if not script_path.exists():
                 _preset_scans[scan_id]["status"] = "error"
                 _preset_scans[scan_id]["error"] = "insider_probe.py not found"
@@ -1530,7 +1537,7 @@ async def run_insider_probe_preset(
             # Run the script with --historical flag for retroactive detection
             process = await asyncio.create_subprocess_exec(
                 "python3", str(script_path), "--historical",
-                cwd="/home/user/Documents/polymarketbot",
+                cwd=str(PROJECT_ROOT),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -1605,7 +1612,7 @@ async def get_insider_probe_results(
     import json
     from pathlib import Path
 
-    result_file = Path("/home/user/Documents/polymarketbot/data/insider_probe_results.json")
+    result_file = DATA_DIR / "insider_probe_results.json")
     if not result_file.exists():
         return {"results": [], "total": 0, "message": "No probe results found. Run an insider probe first."}
 
@@ -1655,7 +1662,7 @@ async def get_mass_scan_results(
     import json
     from pathlib import Path
 
-    result_file = Path("/home/user/Documents/polymarketbot/data/analyzed_accounts.json")
+    result_file = DATA_DIR / "analyzed_accounts.json")
     if not result_file.exists():
         return {"results": [], "total": 0, "message": "No scan results found. Run a mass scan first."}
 
@@ -1710,7 +1717,7 @@ async def add_to_watchlist(wallet: str, notes: str = ""):
     wallet = wallet.lower()
 
     # Get account data from analyzed accounts if available
-    data_file = Path("/home/user/Documents/polymarketbot/data/analyzed_accounts.json")
+    data_file = DATA_DIR / "analyzed_accounts.json")
     account_data = None
 
     if data_file.exists():
@@ -1842,7 +1849,7 @@ def _save_user_prefs():
     from pathlib import Path
     from datetime import datetime
 
-    prefs_file = Path("/home/user/Documents/polymarketbot/data/user_prefs.json")
+    prefs_file = DATA_DIR / "user_prefs.json")
 
     # Only save if there's actual data to save
     if not _watchlist and not _dismissed:
@@ -1868,7 +1875,7 @@ def _load_user_prefs():
     import json
     from pathlib import Path
 
-    prefs_file = Path("/home/user/Documents/polymarketbot/data/user_prefs.json")
+    prefs_file = DATA_DIR / "user_prefs.json")
 
     # Try new unified prefs file first
     if prefs_file.exists():
@@ -1906,7 +1913,7 @@ def _load_user_prefs():
             logger.error("user_prefs_load_error", error=str(e))
 
     # Fall back to old watchlist.json for migration
-    watchlist_file = Path("/home/user/Documents/polymarketbot/data/watchlist.json")
+    watchlist_file = DATA_DIR / "watchlist.json")
     if watchlist_file.exists():
         try:
             with open(watchlist_file) as f:
@@ -1935,7 +1942,7 @@ async def get_analyzed_stats():
     import json
     from pathlib import Path
 
-    data_file = Path("/home/user/Documents/polymarketbot/data/analyzed_accounts.json")
+    data_file = DATA_DIR / "analyzed_accounts.json")
 
     if not data_file.exists():
         return {"error": "Analyzed accounts data not found"}
@@ -2032,14 +2039,14 @@ async def fetch_more_trades(request: FetchMoreTradesRequest):
     import sys
 
     # Add project path for imports
-    sys.path.insert(0, "/home/user/Documents/polymarketbot")
+    sys.path.insert(0, str(PROJECT_ROOT))
     from src.api.data import DataAPIClient, ActivityType
 
     wallet = request.wallet.lower()
     limit = request.limit
 
     # Get current account data
-    data_file = Path("/home/user/Documents/polymarketbot/data/analyzed_accounts.json")
+    data_file = DATA_DIR / "analyzed_accounts.json")
     if not data_file.exists():
         raise HTTPException(status_code=404, detail="No analyzed accounts found")
 
@@ -2433,7 +2440,7 @@ async def get_wallet_positions(wallet_address: str, limit: int = Query(20, ge=1,
     - Unrealized P/L
     """
     import sys
-    sys.path.insert(0, "/home/user/Documents/polymarketbot")
+    sys.path.insert(0, str(PROJECT_ROOT))
     from src.api.data import DataAPIClient, PositionSortBy
     from src.api.gamma import GammaAPIClient
 
