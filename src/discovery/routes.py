@@ -1224,7 +1224,8 @@ async def get_insider_suspects(
         "total_pnl": lambda x: x.get("total_pnl", 0),
         "win_rate": lambda x: x.get("win_rate", 0),
         "account_age_days": lambda x: x.get("account_age_days", 0),
-        "num_trades": lambda x: x.get("num_trades", 0),
+        "num_trades": lambda x: x.get("total_trades", 0),  # Data uses total_trades
+        "total_trades": lambda x: x.get("total_trades", 0),
     }
     filtered.sort(key=sort_keys.get(sort_by, sort_keys["insider_score"]), reverse=reverse)
 
@@ -1241,6 +1242,33 @@ async def get_insider_suspects(
         "limit": limit,
         "accounts": paginated,
     }
+
+
+@router.post("/enrich-profile-views")
+async def enrich_profile_views(
+    wallets: list[str] = Body(..., description="List of wallet addresses to enrich"),
+):
+    """
+    Fetch profile views for a list of wallets.
+
+    Returns a dict mapping wallet -> {views, username}
+    """
+    if not wallets:
+        return {"results": {}}
+
+    # Limit to prevent abuse
+    if len(wallets) > 500:
+        wallets = wallets[:500]
+
+    results = await fetch_all_profile_views(wallets, max_concurrent=15)
+
+    return {
+        "results": {
+            wallet: {"views": stats.views, "username": stats.username}
+            for wallet, stats in results.items()
+        }
+    }
+
 
 
 # =============================================================================
@@ -2529,6 +2557,8 @@ async def categorize_accounts(request: CategorizeRequest):
     Use this after scanning to categorize accounts without
     slowing down the main scan process.
     """
+    from src.api.data import ActivityType
+
     try:
         service = await get_discovery_service()
         analyzer = service._analyzer
@@ -2537,12 +2567,21 @@ async def categorize_accounts(request: CategorizeRequest):
 
         for wallet in request.wallet_addresses:
             try:
-                # Fetch sample of recent trades
+                # Fetch sample of recent trades - try TRADE first, then all activities
                 activities = await analyzer._data_client.get_activity(
                     user=wallet.lower(),
-                    activity_type=analyzer._data_client.ActivityType.TRADE if hasattr(analyzer._data_client, 'ActivityType') else "trade",
+                    activity_type=ActivityType.TRADE,
                     limit=request.sample_trades,
                 )
+
+                # If no TRADE activities, try fetching all activities (including REDEEM)
+                # This helps categorize accounts that mostly hold positions to redemption
+                if not activities:
+                    activities = await analyzer._data_client.get_activity(
+                        user=wallet.lower(),
+                        limit=request.sample_trades,
+                    )
+
 
                 if not activities:
                     results[wallet] = {
