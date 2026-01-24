@@ -943,13 +943,13 @@ async def run_dashboard(port: int = DEFAULT_PORT):
     # Insider Scanner Page & API
     # ==========================================================================
 
-    @app.get("/insider-scanner", response_class=HTMLResponse)
-    async def insider_scanner_page():
+    @app.get("/scanner", response_class=HTMLResponse)
+    async def scanner_page():
         """Insider scanner dashboard page."""
-        template_path = PROJECT_ROOT / "src" / "web" / "templates" / "insider_scanner.html"
+        template_path = PROJECT_ROOT / "src" / "web" / "templates" / "scanner.html"
         if template_path.exists():
             return template_path.read_text()
-        return "<h1>Insider Scanner template not found</h1>"
+        return "<h1>Scanner template not found</h1>"
 
     # Include insider scanner API router if available
     if INSIDER_AVAILABLE:
