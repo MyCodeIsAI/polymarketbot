@@ -34,7 +34,7 @@ from ..utils.logging import get_logger
 logger = get_logger(__name__)
 
 # Polymarket WebSocket endpoints
-WS_ENDPOINT = "wss://ws-subscriptions-clob.polymarket.com/ws"
+WS_ENDPOINT = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 WS_ENDPOINT_USER = "wss://ws-subscriptions-clob.polymarket.com/ws/user"
 
 
@@ -206,14 +206,21 @@ class WebSocketClient:
             if websockets is None:
                 raise ImportError("websockets library not installed")
 
+            # Build connection kwargs - handle different websockets library versions
+            # v11.0+ renamed extra_headers to additional_headers
+            # v13.0+ may require different handling
+            connect_kwargs = {
+                "ping_interval": None,  # We handle heartbeats ourselves
+                "ping_timeout": None,
+                "close_timeout": 5,
+            }
+
+            # Add headers if provided (compatible with websockets v11.0+)
+            if self.auth_headers:
+                connect_kwargs["additional_headers"] = self.auth_headers
+
             self._ws = await asyncio.wait_for(
-                websockets.connect(
-                    self.url,
-                    extra_headers=self.auth_headers,
-                    ping_interval=None,  # We handle heartbeats ourselves
-                    ping_timeout=None,
-                    close_timeout=5,
-                ),
+                websockets.connect(self.url, **connect_kwargs),
                 timeout=self.connection_timeout_s,
             )
 

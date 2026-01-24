@@ -1,0 +1,732 @@
+{
+  "metadata": {
+    "generated_at": "2026-01-24T21:00:00Z",
+    "description": "Documented insider trading accounts from footprint analysis",
+    "source": "docs/insider-scanner/footprints/*.md",
+    "purpose": "Scanner integration for funding source/withdrawal destination analysis",
+    "total_accounts": 18,
+    "verified_wallets": 9,
+    "partial_wallets": 3,
+    "unknown_wallets": 9
+  },
+  "insiders": [
+    {
+      "id": "ricosuave666",
+      "wallet_address": "0x0afc7ce56285bde1fbe3a75efaffdfc86d6530b2",
+      "wallet_verified": true,
+      "username": "ricosuave666",
+      "current_username": "Rundeep",
+      "pseudonym": "Dear-Privacy",
+      "account_created_at": "2025-06-10T16:53:33.601716Z",
+      "category": "military",
+      "subcategory": "israel_iran_operations",
+      "documented_profit_usd": 155699,
+      "documented_trades": 7,
+      "documented_win_rate": 1.0,
+      "status": "active",
+      "investigation_status": "none_announced",
+      "signals": [
+        "perfect_win_rate",
+        "category_tunnel_vision",
+        "timing_precision",
+        "dormancy_reactivation",
+        "identity_evasion",
+        "pump_and_exit"
+      ],
+      "characteristics": {
+        "account_age_days": 365,
+        "win_rate": 1.0,
+        "market_concentration": 1.0,
+        "timing_precision": "exact_day",
+        "dormancy_pattern": true,
+        "name_changed": true
+      },
+      "notable_trades": [
+        {
+          "date": "2025-06-24",
+          "market": "Israel strike Iran Jun 24?",
+          "profit_usd": 128700,
+          "accuracy": "exact_day"
+        },
+        {
+          "date": "2026-01-06",
+          "market": "Israel strikes Iran by Jan 31?",
+          "investment_usd": 8198,
+          "profit_usd": 3600,
+          "note": "pumped odds 16% to 37%, exited early"
+        }
+      ],
+      "footprint_file": "RICOSUAVE666.md",
+      "sources": [
+        "https://dyutam.com/news/polymarket-israel-iran-conflict-insider-trading/",
+        "https://beincrypto.com/polymarket-trader-israel-iran-bet-returns/"
+      ]
+    },
+    {
+      "id": "burdensome_mix",
+      "wallet_address": "0x31a56e9e690c621ed21de08cb559e9524cdb8ed9",
+      "wallet_verified": true,
+      "username": "Burdensome-Mix",
+      "current_username": "0x31a56e9E61eD21De08Cbe9524Cdb8eD9-0765984",
+      "account_created_at": "2025-12-26T06:32:46.767841Z",
+      "category": "military",
+      "subcategory": "regime_change",
+      "documented_profit_usd": 409900,
+      "documented_investment_usd": 34000,
+      "documented_trades": 1,
+      "documented_win_rate": 1.0,
+      "status": "inactive",
+      "investigation_status": "cftc_investigation",
+      "arrest_claimed": true,
+      "signals": [
+        "fresh_account",
+        "single_market_focus",
+        "no_hedging",
+        "timing_precision",
+        "off_hours_trading",
+        "aggressive_accumulation"
+      ],
+      "characteristics": {
+        "account_age_days": 7,
+        "transaction_count": 3,
+        "win_rate": 1.0,
+        "market_concentration": 1.0,
+        "hours_before_event": 6,
+        "trading_hours": [
+          21,
+          22,
+          23,
+          1,
+          2
+        ]
+      },
+      "funding_info": {
+        "source": "coinbase",
+        "source_type": "cex",
+        "withdrawal_dest": "coinbase"
+      },
+      "related_wallets": [
+        "sbet365",
+        "0xa72D"
+      ],
+      "footprint_file": "BURDENSOME-MIX.md",
+      "sources": [
+        "https://www.npr.org/2026/01/05/nx-s1-5667232/polymarket-maduro-bet-insider-trading",
+        "https://x.com/lookonchain/status/2007639475497881625"
+      ]
+    },
+    {
+      "id": "6741",
+      "wallet_address": null,
+      "wallet_verified": false,
+      "username": "6741",
+      "category": "awards",
+      "subcategory": "nobel_peace_prize",
+      "documented_profit_usd": 53000,
+      "documented_investment_usd": 2000,
+      "documented_trades": 1,
+      "documented_win_rate": 1.0,
+      "return_multiple": 25,
+      "status": "unknown",
+      "investigation_status": "norwegian_investigation",
+      "signals": [
+        "brand_new_account",
+        "zero_prior_trades",
+        "single_market_focus",
+        "extreme_longshot_entry",
+        "massive_return",
+        "first_mover"
+      ],
+      "characteristics": {
+        "account_age_hours": 24,
+        "transaction_count": 0,
+        "win_rate": 1.0,
+        "market_concentration": 1.0,
+        "entry_odds": 0.04,
+        "hours_before_event": 11
+      },
+      "note": "Template case for ideal insider pattern - should score 90+",
+      "footprint_file": "6741.md",
+      "sources": [
+        "https://bravenewcoin.com/insights/potential-nobel-peace-prize-betting-scandal-norway-investigates-suspicious-polymarket-activity"
+      ]
+    },
+    {
+      "id": "0xafee",
+      "wallet_address": "0xee50a31c3f5a7c77824b12a941a54388a2827ed6",
+      "wallet_partial": "0xafEe...",
+      "wallet_verified": true,
+      "username": "0xafEe",
+      "previous_username": "AlphaRacoon",
+      "category": "corporate",
+      "subcategory": "google_year_in_search",
+      "documented_profit_usd": 1150000,
+      "documented_deposit_usd": 3000000,
+      "documented_trades": 23,
+      "documented_win_rate": 0.956,
+      "status": "unknown",
+      "investigation_status": "none_announced",
+      "signals": [
+        "near_perfect_win_rate",
+        "category_specialization",
+        "contrarian_longshot_bets",
+        "large_fresh_deposit",
+        "identity_change",
+        "prior_similar_success"
+      ],
+      "characteristics": {
+        "account_age_days": 30,
+        "transaction_count": 25,
+        "win_rate": 0.956,
+        "market_concentration": 0.95,
+        "entry_odds": [
+          0.002,
+          0.05,
+          0.1
+        ],
+        "deposit_before_bets": 3000000,
+        "name_changed": true
+      },
+      "notable_trades": [
+        {
+          "market": "d4vd #1 Searched Person",
+          "entry_odds": 0.002,
+          "investment_usd": 10647,
+          "profit_usd": 200000
+        },
+        {
+          "market": "Gemini 3.0 Launch Date",
+          "accuracy": "exact_day",
+          "profit_usd": 150000
+        }
+      ],
+      "footprint_file": "0XAFEE.md",
+      "sources": [
+        "https://finance.yahoo.com/news/polymarket-trader-makes-1-million-090001027.html",
+        "https://gizmodo.com/polymarket-user-accused-of-1-million-insider-trade-on-google-search-markets-2000696258"
+      ]
+    },
+    {
+      "id": "dirtycup",
+      "wallet_address": null,
+      "wallet_verified": false,
+      "username": "dirtycup",
+      "category": "awards",
+      "subcategory": "nobel_peace_prize",
+      "documented_profit_usd": 31000,
+      "documented_investment_usd": 68340,
+      "documented_trades": 1,
+      "documented_win_rate": 1.0,
+      "status": "unknown",
+      "investigation_status": "norwegian_investigation",
+      "signals": [
+        "zero_prior_trades",
+        "single_market_focus",
+        "off_hours_trading",
+        "large_first_bet"
+      ],
+      "characteristics": {
+        "account_age_days": 14,
+        "transaction_count": 0,
+        "win_rate": 1.0,
+        "market_concentration": 1.0,
+        "entry_odds": 0.08,
+        "trading_hours": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      },
+      "footprint_file": "DIRTYCUP.md",
+      "sources": [
+        "https://protos.com/polymarket-traders-accused-of-insider-trading-nobel-peace-prize/"
+      ]
+    },
+    {
+      "id": "gaypride",
+      "wallet_address": "0x551e72eda42a5ab39d6d78239a1d9bbb5db6b0e0",
+      "wallet_verified": true,
+      "username": "GayPride",
+      "category": "awards",
+      "subcategory": "nobel_peace_prize",
+      "documented_profit_usd": 85000,
+      "documented_trades": 1,
+      "documented_win_rate": 1.0,
+      "status": "unknown",
+      "investigation_status": "norwegian_investigation",
+      "signals": [
+        "high_odds_entry",
+        "single_market_focus"
+      ],
+      "characteristics": {
+        "account_age_days": null,
+        "win_rate": 1.0,
+        "market_concentration": 1.0,
+        "entry_odds": [
+          0.65,
+          0.71
+        ]
+      },
+      "note": "Momentum rider - entered at 60-71% odds, likely NOT first-mover insider",
+      "is_likely_insider": false,
+      "footprint_file": "GAYPRIDE.md",
+      "sources": [
+        "https://bravenewcoin.com/insights/potential-nobel-peace-prize-betting-scandal-norway-investigates-suspicious-polymarket-activity"
+      ]
+    },
+    {
+      "id": "sbet365",
+      "wallet_address": "0x6baf05d193692bb208d616709e27442c910a94c5",
+      "wallet_verified": true,
+      "username": "SBet365",
+      "category": "military",
+      "subcategory": "regime_change",
+      "documented_profit_usd": 145600,
+      "documented_investment_usd": 25000,
+      "documented_trades": 2,
+      "documented_win_rate": 1.0,
+      "status": "active",
+      "investigation_status": "monitoring",
+      "signals": [
+        "fresh_account",
+        "market_category_specialization",
+        "cohort_membership",
+        "repeat_pattern"
+      ],
+      "characteristics": {
+        "account_age_days": 14,
+        "win_rate": 1.0,
+        "market_concentration": 1.0,
+        "specialization": "regime_change",
+        "nations_focus": [
+          "venezuela",
+          "iran"
+        ]
+      },
+      "notable_trades": [
+        {
+          "event": "Venezuela Maduro",
+          "date": "2026-01-03",
+          "investment_usd": 25000,
+          "profit_usd": 145600
+        },
+        {
+          "event": "Iran Khamenei by Jan 31",
+          "status": "active_position",
+          "entry_odds": 0.2
+        }
+      ],
+      "related_wallets": [
+        "burdensome_mix",
+        "0xa72D"
+      ],
+      "footprint_file": "SBET365.md",
+      "sources": [
+        "https://blockchain.news/flashnews/polymarket-insider-wallets-sbet365-bets-khamenei-out-by-jan-31"
+      ]
+    },
+    {
+      "id": "fed_rate_wallet",
+      "wallet_address": null,
+      "wallet_verified": false,
+      "username": null,
+      "category": "government_policy",
+      "subcategory": "fomc",
+      "documented_investment_usd": 17100,
+      "documented_trades": 1,
+      "status": "unknown",
+      "investigation_status": "flagged",
+      "signals": [
+        "brand_new_account",
+        "single_market_focus",
+        "large_first_bet"
+      ],
+      "characteristics": {
+        "account_age_hours": 2,
+        "entry_odds": 0.98
+      },
+      "note": "Betting WITH consensus (98% no change) - lower suspicion",
+      "footprint_file": "FED-RATE-WALLET.md",
+      "sources": [
+        "https://x.com/lookonchain/status/2008790669025046937"
+      ]
+    },
+    {
+      "id": "iran_strike_cluster",
+      "wallet_address": null,
+      "wallet_verified": false,
+      "is_cluster": true,
+      "cluster_size": 4,
+      "username": null,
+      "category": "military",
+      "subcategory": "iran_strikes",
+      "documented_investment_usd": 17851,
+      "documented_trades": 4,
+      "status": "pending",
+      "investigation_status": "none",
+      "signals": [
+        "synchronized_timing",
+        "same_market_entry",
+        "low_odds_entry",
+        "no_other_activity"
+      ],
+      "characteristics": {
+        "wallets_count": 4,
+        "entry_odds": 0.18,
+        "synchronized": true
+      },
+      "footprint_file": "IRAN-STRIKE-WALLETS.md",
+      "sources": [
+        "https://blockchain.news/flashnews/polymarket-us-strikes-iran-by-jan-31-2026-bets-4-new-wallets-make-synchronized-wagers-below-18-odds-trading-signal-watch"
+      ]
+    },
+    {
+      "id": "mutualdelta",
+      "wallet_address": "0xaa6a2beda1ad8d5b40b6af71c4b6d075fa783c59",
+      "wallet_verified": true,
+      "username": "mutualdelta",
+      "category": "military",
+      "subcategory": "iran_strikes",
+      "documented_investment_usd": 40000,
+      "documented_trades": 1,
+      "documented_win_rate": 0.0,
+      "result": "TOTAL_LOSS",
+      "status": "resolved",
+      "is_likely_insider": false,
+      "note": "False positive - followed insider pattern but lost everything",
+      "footprint_file": "IRAN-STRIKE-WALLETS.md",
+      "sources": [
+        "https://blockchain.news/flashnews/polymarket-insider-bet-fails-wallet-mutualdelta-loses-40k-on-us-strikes-iran-by-jan-14-2026-market"
+      ]
+    },
+    {
+      "id": "theo_cluster",
+      "wallet_address": null,
+      "wallet_verified": true,
+      "is_cluster": true,
+      "cluster_size": 11,
+      "username": "Fredi9999",
+      "additional_accounts": [
+        "Theo4",
+        "PrincessCaro",
+        "Michie"
+      ],
+      "real_identity": "Theo (French national)",
+      "category": "election",
+      "subcategory": "us_presidential_2024",
+      "documented_profit_usd": 85000000,
+      "documented_wagered_usd": 70000000,
+      "documented_trades": 100,
+      "documented_win_rate": 0.7,
+      "status": "active",
+      "is_likely_insider": false,
+      "note": "NOT insider - skilled analyst with contrarian thesis",
+      "signals": [
+        "multi_account_cluster",
+        "common_funding_source",
+        "market_overlap",
+        "whale_positions"
+      ],
+      "characteristics": {
+        "account_age_days": 365,
+        "funding_source": "kraken",
+        "market_concentration": 0.5,
+        "has_losses": true
+      },
+      "footprint_file": "THEO-CLUSTER.md",
+      "sources": [
+        "https://www.cnbc.com/2024/10/24/polymarket-trump-french-election-bet.html"
+      ],
+      "cluster_wallets": {
+        "fredi9999": "0x1f2dd6d473f3e824cd2f8a89d9c69fb96f6ad0cf",
+        "theo4": "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+        "princesscaro": "0x8119010a6e589062aa03583bb3f39ca632d9f887",
+        "michie": "0xed2239a9150c3920000d0094d28fa51c7db03dd0"
+      }
+    },
+    {
+      "id": "openai_wallets",
+      "wallet_address": null,
+      "wallet_verified": false,
+      "is_cluster": true,
+      "cluster_size": 4,
+      "username": null,
+      "category": "corporate",
+      "subcategory": "tech_product_launches",
+      "documented_profit_usd": 20000,
+      "documented_trades": 3,
+      "documented_win_rate": 1.0,
+      "status": "unknown",
+      "signals": [
+        "new_wallet_per_bet",
+        "timing_precision",
+        "category_specialization",
+        "tech_product_focus"
+      ],
+      "characteristics": {
+        "target_companies": [
+          "openai",
+          "google"
+        ],
+        "bet_type": "release_dates",
+        "accuracy": "exact_or_near_date"
+      },
+      "notable_trades": [
+        {
+          "event": "OpenAI Browser launch",
+          "date": "2025-10",
+          "investment_usd": 40000,
+          "profit_usd": 7000
+        },
+        {
+          "event": "GPT-5.2 release",
+          "date": "2025-12",
+          "profit_usd": 13000
+        }
+      ],
+      "footprint_file": "OPENAI-WALLETS.md",
+      "sources": [
+        "https://www.theinformation.com/articles/polymarket-bets-openai-google-raise-insider-trading-suspicions"
+      ]
+    },
+    {
+      "id": "bigwinner01",
+      "wallet_address": null,
+      "wallet_verified": false,
+      "username": "bigwinner01",
+      "linked_identity": "Garrett Jin (disputed)",
+      "category": "government_policy",
+      "subcategory": "trump_administration",
+      "documented_profit_usd": 250000000,
+      "documented_trades": 2,
+      "documented_win_rate": 1.0,
+      "status": "active",
+      "investigation_status": "disputed",
+      "signals": [
+        "extreme_position_size",
+        "timing_precision_30min",
+        "cross_platform_coordination",
+        "trump_event_specialization"
+      ],
+      "characteristics": {
+        "position_sizes": [
+          190000000,
+          56000
+        ],
+        "timing_precision_minutes": 30,
+        "platforms": [
+          "hyperliquid",
+          "polymarket"
+        ],
+        "events": [
+          "tariffs",
+          "cz_pardon"
+        ]
+      },
+      "notable_trades": [
+        {
+          "platform": "hyperliquid",
+          "event": "Trump China tariff",
+          "profit_usd": 192000000,
+          "note": "30 min before Truth Social post"
+        },
+        {
+          "platform": "polymarket",
+          "event": "CZ pardon",
+          "profit_usd": 56000
+        }
+      ],
+      "footprint_file": "BIGWINNER01.md",
+      "sources": [
+        "https://cryptoslate.com/the-big-bitcoin-short-who-shorted-btc-before-trumps-tariff-post-to-bank-200-million/"
+      ]
+    },
+    {
+      "id": "portugal_insiders",
+      "wallet_address": null,
+      "wallet_verified": false,
+      "is_cluster": true,
+      "cluster_size": null,
+      "username": null,
+      "category": "election",
+      "subcategory": "portugal_presidential",
+      "documented_volume_eur": 5000000,
+      "documented_trades": null,
+      "status": "unknown",
+      "investigation_status": "regulatory_ban",
+      "signals": [
+        "exit_poll_timing",
+        "volume_spike",
+        "odds_velocity",
+        "coordinated_buying"
+      ],
+      "characteristics": {
+        "timing_window_hours": 2,
+        "odds_movement_percent": 25,
+        "volume_vs_baseline": 10
+      },
+      "note": "Portugal banned Polymarket after this incident",
+      "footprint_file": "PORTUGAL-INSIDERS.md",
+      "sources": [
+        "https://finance.yahoo.com/news/portugal-bans-polymarket-over-4m-155854731.html"
+      ]
+    },
+    {
+      "id": "annica",
+      "wallet_address": "0x689ae12e11aa489adb3605afd8f39040ff52779e",
+      "wallet_verified": true,
+      "username": "Annica",
+      "category": "social_media",
+      "subcategory": "elon_musk_tweets",
+      "documented_profit_usd": 267613,
+      "documented_trades": 50,
+      "documented_win_rate": 0.8,
+      "status": "active",
+      "is_likely_insider": false,
+      "note": "May be pattern recognition rather than insider - controllable outcome market",
+      "signals": [
+        "category_concentration",
+        "high_win_rate",
+        "long_term_edge",
+        "single_entity_focus"
+      ],
+      "characteristics": {
+        "duration_months": 5,
+        "win_rate": 0.8,
+        "market_concentration": 1.0,
+        "category": "elon_musk_tweets_only"
+      },
+      "footprint_file": "ANNICA.md",
+      "sources": [
+        "https://www.cryptotimes.io/2026/01/17/elon-musk-on-polymarket-users-80-accuracy-hints-he-might-be-the-one/"
+      ]
+    },
+    {
+      "id": "0xa72d",
+      "wallet_address": null,
+      "wallet_partial": "0xa72D...",
+      "wallet_verified": false,
+      "username": null,
+      "category": "military",
+      "subcategory": "regime_change",
+      "documented_profit_usd": 75000,
+      "documented_investment_usd": 5800,
+      "documented_trades": 1,
+      "documented_win_rate": 1.0,
+      "status": "inactive",
+      "signals": [
+        "fresh_account",
+        "single_market_focus",
+        "cohort_membership"
+      ],
+      "related_wallets": [
+        "burdensome_mix",
+        "sbet365"
+      ],
+      "footprint_file": "BURDENSOME-MIX.md",
+      "sources": [
+        "https://x.com/lookonchain/status/2007639475497881625"
+      ]
+    },
+    {
+      "id": "wlfi_connection",
+      "wallet_address": "0x31a56e9e690c621ed21de08cb559e9524cdb8ed9",
+      "wallet_verified": true,
+      "same_as": "burdensome_mix",
+      "alleged_connection": "Steve Witkoff (WLFI co-founder)",
+      "evidence_type": "ENS domain analysis",
+      "status": "disputed",
+      "investigation_status": "bubblemaps_rejected",
+      "ens_domains": [
+        "STVLU.SOL",
+        "StCharles.SOL",
+        "Solhundred.sol",
+        "Stevencharles.sol"
+      ],
+      "note": "Connection alleged by Andrew 10 GWEI, rejected by Bubblemaps",
+      "footprint_file": "WLFI-CONNECTION.md",
+      "sources": [
+        "https://finance.yahoo.com/news/polymarket-insider-venezuela-bet-allegedly-205757379.html"
+      ]
+    }
+  ],
+  "funding_sources_to_monitor": [
+    {
+      "type": "cex",
+      "name": "Coinbase",
+      "associated_insiders": [
+        "burdensome_mix",
+        "sbet365",
+        "0xa72d"
+      ],
+      "risk_level": "medium",
+      "note": "Direct funding with no intermediaries"
+    },
+    {
+      "type": "cex",
+      "name": "Kraken",
+      "associated_insiders": [
+        "theo_cluster"
+      ],
+      "risk_level": "low",
+      "note": "Associated with whale trader, not confirmed insider"
+    }
+  ],
+  "scanner_integration": {
+    "known_insider_wallets": [
+      "0x689ae12e11aa489adb3605afd8f39040ff52779e",
+      "0x6baf05d193692bb208d616709e27442c910a94c5",
+      "0xee50a31c3f5a7c77824b12a941a54388a2827ed6",
+      "0x0afc7ce56285bde1fbe3a75efaffdfc86d6530b2",
+      "0x31a56e9e690c621ed21de08cb559e9524cdb8ed9",
+      "0x551e72eda42a5ab39d6d78239a1d9bbb5db6b0e0"
+    ],
+    "known_insider_usernames": [
+      "ricosuave666",
+      "Rundeep",
+      "Burdensome-Mix",
+      "6741",
+      "0xafEe",
+      "AlphaRacoon",
+      "dirtycup",
+      "GayPride",
+      "SBet365",
+      "mutualdelta",
+      "bigwinner01",
+      "Annica"
+    ],
+    "high_risk_categories": [
+      "military",
+      "regime_change",
+      "awards",
+      "government_policy",
+      "corporate"
+    ],
+    "patterns_to_detect": {
+      "fresh_account_large_bet": {
+        "account_age_days_max": 7,
+        "position_size_usd_min": 10000
+      },
+      "perfect_win_rate": {
+        "win_rate_min": 1.0,
+        "resolved_bets_min": 3
+      },
+      "category_tunnel_vision": {
+        "concentration_min": 0.95,
+        "markets_min": 1
+      },
+      "timing_precision": {
+        "hours_before_event_max": 24
+      },
+      "synchronized_cluster": {
+        "wallet_count_min": 2,
+        "time_window_hours": 2
+      }
+    }
+  }
+}

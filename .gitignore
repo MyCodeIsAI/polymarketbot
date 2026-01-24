@@ -87,3 +87,14 @@ proxy_config.json     # May contain proxy credentials
 ghost_state.json
 data/user_prefs.json
 config/accounts.yaml
+
+# Funding source extraction output (contains wallet data)
+data/funding_sources.json
+data/profitable_wallets_funding.json
+data/profitable_wallets_full.json
+data/funding_summary.txt
+data/extraction_checkpoint.json
+data/profitable_accounts.txt
+data/fund_flow_graph.json
+data/withdrawal_destinations.json
+data/cluster_report.txt

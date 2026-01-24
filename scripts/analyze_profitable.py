@@ -83,6 +83,13 @@ class AccountMetrics:
     pl_curve_smoothness: float = 0  # 0-1, higher = smoother curve
     profit_factor: float = 0  # Gross profit / gross loss
 
+    # Additional P/L metrics (for detailed analysis)
+    avg_win_size: float = 0  # Average winning trade USD
+    avg_loss_size: float = 0  # Average losing trade USD
+    gross_profit: float = 0  # Total gross profit USD
+    gross_loss: float = 0  # Total gross loss USD
+    sharpe_ratio: float = 0  # Risk-adjusted return (simplified)
+
     # Legacy field for backward compatibility
     estimated_drawdown_pct: float = 0  # Deprecated, use max_drawdown_pct
 
@@ -136,6 +143,12 @@ class AccountMetrics:
             "current_drawdown_pct": self.current_drawdown_pct,
             "pl_curve_smoothness": self.pl_curve_smoothness,
             "profit_factor": self.profit_factor,
+            # Additional P/L metrics
+            "avg_win_size": self.avg_win_size,
+            "avg_loss_size": self.avg_loss_size,
+            "gross_profit": self.gross_profit,
+            "gross_loss": self.gross_loss,
+            "sharpe_ratio": self.sharpe_ratio,
             # Legacy (deprecated)
             "estimated_drawdown_pct": self.max_drawdown_pct,  # Map to new field
             # Scoring
@@ -144,6 +157,123 @@ class AccountMetrics:
             # Metadata
             "trades_fetched": self.trades_fetched,
         }
+
+
+def detect_market_category(event_slug: str = None, market_title: str = None) -> str:
+    """
+    Detect the broad category of a market based on event_slug and title.
+
+    Categories:
+        sports, politics, crypto, finance, weather, entertainment, tech, other
+    """
+    # Combine all text for matching
+    text = ""
+    if event_slug:
+        text += event_slug.lower() + " "
+    if market_title:
+        text += market_title.lower()
+
+    if not text:
+        return "other"
+
+    # Sports patterns (most specific first)
+    sports_patterns = [
+        # Soccer/Football leagues
+        "fl1", "fr2", "epl", "laliga", "serie", "bundesliga", "mls", "ucl", "uel",
+        "premier league", "champions league", "europa league", "copa", "fifa",
+        # US Sports
+        "nfl", "nba", "mlb", "nhl", "ncaa", "college football", "college basketball",
+        "super bowl", "world series", "stanley cup",
+        # Other sports
+        "tennis", "atp", "wta", "wimbledon", "us open", "australian open",
+        "golf", "pga", "masters", "british open",
+        "f1", "formula 1", "nascar", "indy",
+        "ufc", "mma", "boxing",
+        "olympics", "world cup",
+        # Generic sports terms
+        "win on 20", "-win-", "-draw", "-home-", "-away-",
+        "vs.", "match", "game", "playoffs", "finals",
+        "team", "player", "score", "points",
+    ]
+
+    for pattern in sports_patterns:
+        if pattern in text:
+            return "sports"
+
+    # Politics patterns
+    politics_patterns = [
+        "president", "election", "congress", "senate", "house", "governor",
+        "democrat", "republican", "trump", "biden", "vote", "poll",
+        "primary", "caucus", "nominee", "candidate",
+        "government", "legislation", "bill", "law",
+        "political", "parliament", "minister", "mayor",
+    ]
+
+    for pattern in politics_patterns:
+        if pattern in text:
+            return "politics"
+
+    # Crypto patterns
+    crypto_patterns = [
+        "bitcoin", "btc", "ethereum", "eth", "crypto", "blockchain",
+        "solana", "sol", "cardano", "ada", "dogecoin", "doge",
+        "token", "defi", "nft", "web3", "halving",
+        "$100k", "$150k", "$200k",  # BTC price predictions
+    ]
+
+    for pattern in crypto_patterns:
+        if pattern in text:
+            return "crypto"
+
+    # Finance/Economics patterns
+    finance_patterns = [
+        "fed", "federal reserve", "interest rate", "inflation", "gdp",
+        "stock", "market", "s&p", "nasdaq", "dow", "index",
+        "earnings", "revenue", "ipo", "merger", "acquisition",
+        "dollar", "euro", "currency", "forex",
+        "recession", "economic", "unemployment", "jobs report",
+    ]
+
+    for pattern in finance_patterns:
+        if pattern in text:
+            return "finance"
+
+    # Weather patterns
+    weather_patterns = [
+        "weather", "temperature", "hurricane", "storm", "rain",
+        "snow", "flood", "drought", "climate", "celsius", "fahrenheit",
+        "hottest", "coldest", "forecast",
+    ]
+
+    for pattern in weather_patterns:
+        if pattern in text:
+            return "weather"
+
+    # Entertainment/Culture patterns
+    entertainment_patterns = [
+        "movie", "film", "oscar", "emmy", "grammy", "award",
+        "music", "album", "song", "artist", "celebrity",
+        "tv show", "series", "netflix", "streaming",
+        "gaming", "esports", "twitch",
+    ]
+
+    for pattern in entertainment_patterns:
+        if pattern in text:
+            return "entertainment"
+
+    # Tech patterns
+    tech_patterns = [
+        "apple", "google", "microsoft", "meta", "amazon", "tesla",
+        "ai", "artificial intelligence", "openai", "chatgpt",
+        "launch", "release", "iphone", "android",
+        "spacex", "nasa", "rocket", "satellite",
+    ]
+
+    for pattern in tech_patterns:
+        if pattern in text:
+            return "tech"
+
+    return "other"
 
 
 def load_accounts() -> list[tuple[str, float]]:
@@ -161,8 +291,8 @@ def load_accounts() -> list[tuple[str, float]]:
     return accounts
 
 
-async def fetch_all_activities(client: DataAPIClient, wallet: str, max_pages: int = 20) -> list:
-    """Fetch ALL trading activities by paginating through the API.
+async def fetch_all_activities(client: DataAPIClient, wallet: str, max_pages: int = 20) -> tuple[list, list]:
+    """Fetch ALL trading AND redemption activities by paginating through the API.
 
     Args:
         client: DataAPIClient instance
@@ -170,12 +300,14 @@ async def fetch_all_activities(client: DataAPIClient, wallet: str, max_pages: in
         max_pages: Max pages to fetch (each page = 500 activities)
 
     Returns:
-        List of all Activity objects
+        Tuple of (trade_activities, redeem_activities)
     """
-    all_activities = []
+    all_trades = []
+    all_redeems = []
+
+    # Fetch TRADE activities
     offset = 0
     limit = 500
-
     for page in range(max_pages):
         try:
             activities = await client.get_activity(
@@ -184,31 +316,52 @@ async def fetch_all_activities(client: DataAPIClient, wallet: str, max_pages: in
                 limit=limit,
                 offset=offset,
             )
-
             if not activities:
                 break
-
-            all_activities.extend(activities)
-
-            # If we got less than limit, we've reached the end
+            all_trades.extend(activities)
             if len(activities) < limit:
                 break
-
             offset += limit
-            await asyncio.sleep(0.02)  # Small delay between pages
-
+            await asyncio.sleep(0.02)
         except Exception:
             break
 
-    return all_activities
+    # Fetch REDEEM activities (resolved positions)
+    offset = 0
+    for page in range(max_pages // 2):  # Fewer pages for redeems
+        try:
+            activities = await client.get_activity(
+                user=wallet,
+                activity_type=ActivityType.REDEEM,
+                limit=limit,
+                offset=offset,
+            )
+            if not activities:
+                break
+            all_redeems.extend(activities)
+            if len(activities) < limit:
+                break
+            offset += limit
+            await asyncio.sleep(0.02)
+        except Exception:
+            break
+
+    return all_trades, all_redeems
 
 
-def calculate_drawdown_metrics(activities: list, total_pnl: float) -> dict:
+def calculate_drawdown_metrics(trades: list, total_pnl: float, redeems: list = None) -> dict:
     """
-    Calculate proper drawdown metrics by constructing a P/L curve from trades.
+    Calculate proper drawdown metrics by constructing a REAL P/L curve from trades AND redemptions.
 
-    This analyzes every trade chronologically, builds a cumulative P/L curve,
-    and identifies all drawdown periods (peak to trough declines).
+    This uses proper position tracking to compute realized P/L:
+    - BUY: Accumulate position with cost basis
+    - SELL: Compute realized P/L = proceeds - (avg_cost * shares_sold)
+    - REDEEM: Compute resolution P/L = redeem_amount - cost_basis (winning resolution)
+
+    Args:
+        trades: List of TRADE activities
+        total_pnl: Total P/L from leaderboard (for reference)
+        redeems: List of REDEEM activities (resolved positions)
 
     Returns dict with:
         - max_drawdown_pct: Worst peak-to-trough decline as percentage
@@ -223,7 +376,9 @@ def calculate_drawdown_metrics(activities: list, total_pnl: float) -> dict:
         - pl_curve_smoothness: 0-1 score for P/L curve smoothness
         - profit_factor: Gross profit / gross loss
     """
-    if not activities or len(activities) < 10:
+    redeems = redeems or []
+
+    if not trades or len(trades) < 10:
         return {
             "max_drawdown_pct": 0,
             "max_drawdown_usd": 0,
@@ -238,105 +393,127 @@ def calculate_drawdown_metrics(activities: list, total_pnl: float) -> dict:
             "profit_factor": 1.0,
         }
 
-    # Sort activities chronologically (oldest first)
-    sorted_activities = sorted(activities, key=lambda a: a.timestamp)
-
-    total_volume = sum(float(a.usd_value) for a in sorted_activities if a.usd_value > 0)
-    if total_volume == 0:
-        total_volume = 1
-
-    num_trades = len([a for a in sorted_activities if a.usd_value and float(a.usd_value) > 0])
-    if num_trades == 0:
-        num_trades = 1
+    # Combine trades and redeems, sort chronologically
+    all_activities = list(trades) + list(redeems)
+    sorted_activities = sorted(all_activities, key=lambda a: a.timestamp)
 
     # =========================================================================
-    # NEW APPROACH: Simulate realistic win/loss pattern
-    # Instead of distributing P/L proportionally (which creates monotonic growth),
-    # we simulate individual wins and losses that sum to the total P/L.
+    # PROPER P/L TRACKING: Track positions by condition_id and compute realized P/L
+    # We use condition_id because REDEEM activities don't have token_id
     # =========================================================================
+    from decimal import Decimal
 
-    # Estimate win rate based on P/L efficiency
-    # Higher return on volume suggests higher win rate or better sizing
-    return_on_volume = total_pnl / total_volume if total_volume > 0 else 0
-
-    if total_pnl > 0:
-        # Profitable account: estimate win rate 52-68% based on efficiency
-        estimated_win_rate = min(0.68, max(0.52, 0.52 + return_on_volume * 2))
-    else:
-        # Losing account: estimate win rate 35-48%
-        estimated_win_rate = max(0.35, min(0.48, 0.48 + return_on_volume * 2))
-
-    # Calculate average win/loss sizes that result in total P/L
-    # Given: win_rate * num_trades * avg_win - (1 - win_rate) * num_trades * avg_loss = total_pnl
-    # Assume avg_win = 1.5 * avg_loss (typical for successful traders)
-    # This gives us: win_rate * 1.5 * avg_loss - (1 - win_rate) * avg_loss = pnl_per_trade
-    # avg_loss * (1.5 * win_rate - 1 + win_rate) = pnl_per_trade
-    # avg_loss * (2.5 * win_rate - 1) = pnl_per_trade
-
-    pnl_per_trade = total_pnl / num_trades
-    win_loss_ratio = 1.5 if total_pnl > 0 else 0.7  # Winners bigger than losers for profitable accounts
-
-    denominator = win_loss_ratio * estimated_win_rate - (1 - estimated_win_rate)
-    if abs(denominator) < 0.01:
-        denominator = 0.01  # Prevent division by zero
-
-    avg_loss = abs(pnl_per_trade / denominator) if denominator != 0 else abs(pnl_per_trade)
-    avg_win = avg_loss * win_loss_ratio
-
-    # Use a seeded random based on first activity timestamp for reproducibility
-    import random
-    first_ts = sorted_activities[0].timestamp if sorted_activities else None
-    seed = int(first_ts.timestamp()) if first_ts else 12345
-    rng = random.Random(seed)
-
-    # Generate per-trade P/L with realistic variance
+    # Track positions by condition_id for resolution matching
+    positions = {}  # condition_id -> {"size": Decimal, "cost": Decimal, "outcome": str}
     cumulative_pnl = []
-    running_pnl = 0
-    gross_profit = 0
-    gross_loss = 0
-    trade_pnls = []
+    running_pnl = Decimal("0")
+    gross_profit = Decimal("0")
+    gross_loss = Decimal("0")
+    win_count = 0
+    loss_count = 0
 
-    for i, activity in enumerate(sorted_activities):
-        trade_size = float(activity.usd_value) if activity.usd_value else 0
-        if trade_size <= 0:
-            continue
+    for activity in sorted_activities:
+        activity_type = getattr(activity.type, 'value', str(activity.type)) if hasattr(activity, 'type') else "TRADE"
+        condition_id = activity.condition_id or "unknown"
 
-        # Size-weighted win probability (bigger trades slightly more likely to win for profitable accounts)
-        size_factor = trade_size / (total_volume / num_trades) if total_volume > 0 else 1
-        adjusted_win_rate = estimated_win_rate
-        if total_pnl > 0:
-            adjusted_win_rate = min(0.75, estimated_win_rate + (size_factor - 1) * 0.05)
+        if activity_type == "REDEEM":
+            # =====================================================================
+            # REDEEM: Market resolved - user claiming winnings
+            # Redeem amount = $1.00 per winning share
+            # P/L = redeem_amount - cost_basis
+            # =====================================================================
+            redeem_amount = Decimal(str(activity.usd_value)) if activity.usd_value else Decimal("0")
 
-        # Determine if this trade is a winner
-        is_winner = rng.random() < adjusted_win_rate
+            if condition_id in positions and redeem_amount > 0:
+                pos = positions[condition_id]
+                cost_basis = pos["cost"]
 
-        # Calculate P/L with variance
-        if is_winner:
-            # Winner: positive P/L with variance
-            base = avg_win * (trade_size / (total_volume / num_trades))
-            variance = rng.uniform(0.5, 2.0)  # 50% to 200% of expected
-            trade_pnl = base * variance
-            gross_profit += trade_pnl
+                # Realized P/L from resolution = what they got - what they paid
+                realized_pnl = redeem_amount - cost_basis
+
+                running_pnl += realized_pnl
+
+                if realized_pnl > 0:
+                    gross_profit += realized_pnl
+                    win_count += 1
+                elif realized_pnl < 0:
+                    gross_loss += abs(realized_pnl)
+                    loss_count += 1
+
+                # Position is now closed
+                del positions[condition_id]
+
+            elif redeem_amount > 0:
+                # Redeem without tracked position (position was from before our data window)
+                # Conservatively estimate they bought at ~50% avg price
+                estimated_cost = redeem_amount * Decimal("0.5")
+                estimated_profit = redeem_amount - estimated_cost
+                running_pnl += estimated_profit
+                gross_profit += estimated_profit
+                win_count += 1
+
         else:
-            # Loser: negative P/L with variance
-            base = avg_loss * (trade_size / (total_volume / num_trades))
-            variance = rng.uniform(0.5, 2.0)
-            trade_pnl = -base * variance
-            gross_loss += abs(trade_pnl)
+            # =====================================================================
+            # TRADE: Buy or Sell
+            # =====================================================================
+            trade_size = Decimal(str(activity.usd_value)) if activity.usd_value else Decimal("0")
+            if trade_size <= 0:
+                continue
 
-        trade_pnls.append(trade_pnl)
-        running_pnl += trade_pnl
-        cumulative_pnl.append(running_pnl)
+            side = getattr(activity.side, 'value', str(activity.side)) if activity.side else "BUY"
+            price = Decimal(str(activity.price)) if activity.price else Decimal("0.5")
+            outcome = getattr(activity, 'outcome', '') or ''
 
-    # Scale the curve to match actual total P/L
-    if cumulative_pnl and cumulative_pnl[-1] != 0:
-        scale_factor = total_pnl / cumulative_pnl[-1]
-        cumulative_pnl = [p * scale_factor for p in cumulative_pnl]
-        # Also scale gross profit/loss
-        gross_profit *= abs(scale_factor)
-        gross_loss *= abs(scale_factor)
+            # Calculate share quantity from USD value and price
+            if price > 0:
+                shares = trade_size / price
+            else:
+                shares = trade_size
 
-    if not cumulative_pnl:
+            if side.upper() == "BUY":
+                # Accumulate position
+                if condition_id not in positions:
+                    positions[condition_id] = {"size": Decimal("0"), "cost": Decimal("0"), "outcome": outcome}
+                positions[condition_id]["size"] += shares
+                positions[condition_id]["cost"] += trade_size
+            else:  # SELL
+                if condition_id in positions:
+                    pos = positions[condition_id]
+                    if pos["size"] > 0:
+                        # Compute average cost basis
+                        avg_cost = pos["cost"] / pos["size"]
+                        shares_to_sell = min(shares, pos["size"])
+
+                        # Realized P/L = sale proceeds - cost basis
+                        cost_basis = avg_cost * shares_to_sell
+                        sale_proceeds = shares_to_sell * price
+                        realized_pnl = sale_proceeds - cost_basis
+
+                        running_pnl += realized_pnl
+
+                        if realized_pnl > 0:
+                            gross_profit += realized_pnl
+                            win_count += 1
+                        elif realized_pnl < 0:
+                            gross_loss += abs(realized_pnl)
+                            loss_count += 1
+
+                        # Update position
+                        pos["size"] -= shares_to_sell
+                        pos["cost"] -= cost_basis
+                        if pos["size"] <= 0:
+                            del positions[condition_id]
+                else:
+                    # Selling without a tracked position (short or data gap)
+                    # Treat as a realized loss at 10% of trade value (conservative)
+                    estimated_loss = trade_size * Decimal("0.1")
+                running_pnl -= estimated_loss
+                gross_loss += estimated_loss
+                loss_count += 1
+
+        cumulative_pnl.append(float(running_pnl))
+
+    if not cumulative_pnl or len(cumulative_pnl) < 5:
         return {
             "max_drawdown_pct": 0,
             "max_drawdown_usd": 0,
@@ -351,45 +528,50 @@ def calculate_drawdown_metrics(activities: list, total_pnl: float) -> dict:
             "profit_factor": 1.0,
         }
 
-    # Calculate drawdowns from the P/L curve
-    # Drawdown = (peak - current) / peak (as percentage)
-    # Start peak at 0 (initial state before any trades)
-    peak = 0
-    peak_idx = -1
-    drawdowns = []  # List of (drawdown_pct, drawdown_usd, start_idx, end_idx)
+    # =========================================================================
+    # Calculate drawdowns from the REAL P/L curve
+    # =========================================================================
+    peak = 0.0
+    peak_idx = 0
+    drawdowns = []
     current_drawdown_start = None
+    min_since_peak = 0.0
 
     for i, pnl_point in enumerate(cumulative_pnl):
         if pnl_point > peak:
             # New peak - if we were in a drawdown, record it
-            if current_drawdown_start is not None:
-                drawdown_usd = peak - min(cumulative_pnl[current_drawdown_start:i])
-                drawdown_pct = (drawdown_usd / max(1, peak)) * 100 if peak > 0 else 0
+            if current_drawdown_start is not None and peak > 0:
+                drawdown_usd = peak - min_since_peak
+                drawdown_pct = (drawdown_usd / peak) * 100
                 recovery_trades = i - current_drawdown_start
-                drawdowns.append({
-                    "pct": drawdown_pct,
-                    "usd": drawdown_usd,
-                    "recovery_trades": recovery_trades,
-                })
+                if drawdown_pct > 1:  # Only track drawdowns > 1%
+                    drawdowns.append({
+                        "pct": drawdown_pct,
+                        "usd": drawdown_usd,
+                        "recovery_trades": recovery_trades,
+                    })
                 current_drawdown_start = None
             peak = pnl_point
             peak_idx = i
-        elif pnl_point < peak and current_drawdown_start is None:
-            # Starting a new drawdown
-            current_drawdown_start = i
+            min_since_peak = pnl_point
+        elif pnl_point < peak:
+            if current_drawdown_start is None:
+                current_drawdown_start = i
+                min_since_peak = pnl_point
+            else:
+                min_since_peak = min(min_since_peak, pnl_point)
 
     # Check if currently in a drawdown
-    current_drawdown_pct = 0
+    current_drawdown_pct = 0.0
     if current_drawdown_start is not None and peak > 0:
-        current_low = min(cumulative_pnl[current_drawdown_start:])
-        current_drawdown_usd = peak - current_low
+        current_drawdown_usd = peak - min_since_peak
         current_drawdown_pct = (current_drawdown_usd / peak) * 100
-        # Also add this as an incomplete drawdown
-        drawdowns.append({
-            "pct": current_drawdown_pct,
-            "usd": current_drawdown_usd,
-            "recovery_trades": 0,  # Not recovered yet
-        })
+        if current_drawdown_pct > 1:
+            drawdowns.append({
+                "pct": current_drawdown_pct,
+                "usd": current_drawdown_usd,
+                "recovery_trades": 0,
+            })
 
     # Filter to meaningful drawdowns (> 2%)
     significant_drawdowns = [d for d in drawdowns if d["pct"] > 2]
@@ -402,11 +584,9 @@ def calculate_drawdown_metrics(activities: list, total_pnl: float) -> dict:
         avg_drawdown_pct = sum(d["pct"] for d in significant_drawdowns) / len(significant_drawdowns)
         avg_drawdown_usd = sum(d["usd"] for d in significant_drawdowns) / len(significant_drawdowns)
 
-        # Count drawdowns by severity
         drawdown_count = len([d for d in significant_drawdowns if d["pct"] > 5])
         severe_drawdown_count = len([d for d in significant_drawdowns if d["pct"] > 15])
 
-        # Recovery time
         recovered_drawdowns = [d for d in significant_drawdowns if d["recovery_trades"] > 0]
         avg_recovery_trades = (
             sum(d["recovery_trades"] for d in recovered_drawdowns) / len(recovered_drawdowns)
@@ -423,25 +603,41 @@ def calculate_drawdown_metrics(activities: list, total_pnl: float) -> dict:
 
     # Drawdown frequency (per 100 trades)
     num_trades = len(cumulative_pnl)
-    drawdown_frequency = (drawdown_count / num_trades) * 100 if num_trades > 0 else 0
+    drawdown_frequency = (len(significant_drawdowns) / num_trades) * 100 if num_trades > 0 else 0
 
     # P/L curve smoothness
-    # Calculate based on how much the curve deviates from a straight line
-    # A perfectly smooth curve would go directly from 0 to final P/L
-    if len(cumulative_pnl) > 10 and total_pnl > 0:
-        # Expected linear growth at each point
-        expected_pnl = [i * (total_pnl / len(cumulative_pnl)) for i in range(len(cumulative_pnl))]
-        # Calculate mean absolute deviation from expected
+    final_pnl = cumulative_pnl[-1] if cumulative_pnl else 0
+    if len(cumulative_pnl) > 10 and final_pnl > 0:
+        expected_pnl = [i * (final_pnl / len(cumulative_pnl)) for i in range(len(cumulative_pnl))]
         deviations = [abs(actual - expected) for actual, expected in zip(cumulative_pnl, expected_pnl)]
         avg_deviation = sum(deviations) / len(deviations)
-        # Normalize by total P/L to get a 0-1 score (inverted: lower deviation = higher smoothness)
-        deviation_ratio = avg_deviation / max(1, total_pnl)
+        deviation_ratio = avg_deviation / max(1, final_pnl)
         pl_curve_smoothness = max(0, min(1, 1 - deviation_ratio))
     else:
         pl_curve_smoothness = 0.5
 
-    # Profit factor
-    profit_factor = gross_profit / max(1, gross_loss) if gross_loss > 0 else (2.0 if gross_profit > 0 else 1.0)
+    # Profit factor and win rate
+    profit_factor = float(gross_profit / gross_loss) if gross_loss > 0 else (2.0 if gross_profit > 0 else 1.0)
+    profit_factor = min(profit_factor, 10.0)  # Cap at 10x
+
+    actual_win_rate = win_count / (win_count + loss_count) if (win_count + loss_count) > 0 else 0.5
+
+    # Average win/loss sizes
+    avg_win_size = float(gross_profit / win_count) if win_count > 0 else 0
+    avg_loss_size = float(gross_loss / loss_count) if loss_count > 0 else 0
+
+    # Sharpe ratio (simplified: mean P/L / std dev of P/L per trade)
+    if len(cumulative_pnl) > 10:
+        trade_returns = [cumulative_pnl[i] - cumulative_pnl[i-1] for i in range(1, len(cumulative_pnl))]
+        if trade_returns:
+            import statistics
+            mean_return = statistics.mean(trade_returns)
+            std_return = statistics.stdev(trade_returns) if len(trade_returns) > 1 else 1
+            sharpe_ratio = mean_return / std_return if std_return > 0 else 0
+        else:
+            sharpe_ratio = 0
+    else:
+        sharpe_ratio = 0
 
     return {
         "max_drawdown_pct": round(max_drawdown_pct, 2),
@@ -455,19 +651,31 @@ def calculate_drawdown_metrics(activities: list, total_pnl: float) -> dict:
         "current_drawdown_pct": round(current_drawdown_pct, 2),
         "pl_curve_smoothness": round(pl_curve_smoothness, 3),
         "profit_factor": round(profit_factor, 2),
+        "actual_win_rate": round(actual_win_rate, 3),
+        "avg_win_size": round(avg_win_size, 2),
+        "avg_loss_size": round(avg_loss_size, 2),
+        "gross_profit": round(float(gross_profit), 2),
+        "gross_loss": round(float(gross_loss), 2),
+        "sharpe_ratio": round(sharpe_ratio, 3),
+        "win_count": win_count,
+        "loss_count": loss_count,
     }
 
 
 async def fetch_account_metrics(client: DataAPIClient, wallet: str, pnl: float) -> Optional[AccountMetrics]:
     """Fetch detailed metrics for an account using activity data."""
     try:
-        # Get ALL trading activity by paginating
-        activities = await fetch_all_activities(client, wallet, max_pages=20)
+        # Get ALL trading AND redemption activity by paginating
+        trades, redeems = await fetch_all_activities(client, wallet, max_pages=20)
+
+        # Use trades for most metrics (redeems passed separately to P/L calculation)
+        activities = trades  # For backward compatibility with metrics below
 
         if not activities:
             return None
 
         num_trades = len(activities)
+        num_redeems = len(redeems)  # Track resolved positions
         if num_trades < 10:  # Need minimum trades for meaningful analysis
             return None
 
@@ -489,23 +697,35 @@ async def fetch_account_metrics(client: DataAPIClient, wallet: str, pnl: float) 
         else:
             position_consistency = 0
 
-        # Activity metrics - dates
+        # Activity metrics - dates (include BOTH trades AND redeems for activity tracking)
         now = datetime.now()
         dates = set()
         timestamps_dt = []
+
+        # Process trade timestamps
         for a in activities:
             try:
                 dates.add(a.timestamp.strftime("%Y-%m-%d"))
                 timestamps_dt.append(a.timestamp)
             except:
                 pass
-        active_days = len(dates)
 
-        # Account age from earliest to latest activity
+        # Also include redeem timestamps for activity recency
+        # (if someone redeemed recently, they're still active on the platform)
+        for r in redeems:
+            try:
+                timestamps_dt.append(r.timestamp)
+                # Don't add to dates - we count active TRADING days separately
+            except:
+                pass
+
+        active_days = len(dates)  # Active TRADING days only
+
+        # Account age and activity recency - based on ALL activities (trades + redeems)
         if len(timestamps_dt) >= 2:
             sorted_ts = sorted(timestamps_dt)
             account_age_days = max(1, (sorted_ts[-1] - sorted_ts[0]).days)
-            # Activity recency - days since last trade
+            # Activity recency - days since last trade OR redeem
             activity_recency_days = (now - sorted_ts[-1]).days
         else:
             account_age_days = max(30, active_days * 2)
@@ -513,9 +733,15 @@ async def fetch_account_metrics(client: DataAPIClient, wallet: str, pnl: float) 
 
         trades_per_week = (num_trades / max(1, account_age_days)) * 7
 
-        # Unique markets - ACTUAL DATA
-        markets = set(a.condition_id for a in activities if a.condition_id)
-        unique_markets = len(markets)
+        # Unique market CATEGORIES (sports, politics, crypto, etc.) - not individual markets
+        categories = set()
+        for a in activities:
+            category = detect_market_category(
+                event_slug=getattr(a, 'event_slug', None),
+                market_title=getattr(a, 'market_title', None)
+            )
+            categories.add(category)
+        unique_markets = len(categories)  # Now counts categories, not individual condition IDs
 
         # Buy/sell ratio - ACTUAL DATA
         buys = sum(1 for a in activities if a.side and a.side.value == "BUY")
@@ -549,7 +775,19 @@ async def fetch_account_metrics(client: DataAPIClient, wallet: str, pnl: float) 
             except:
                 pass
 
-        is_currently_active = trades_last_7d > 0
+        # Also count recent redeems for activity status
+        # (redeeming = still active on platform, even if not trading)
+        redeems_last_7d = 0
+        for r in redeems:
+            try:
+                days_ago = (now - r.timestamp).days
+                if days_ago <= 7:
+                    redeems_last_7d += 1
+            except:
+                pass
+
+        # Account is active if they traded OR redeemed in last 7 days
+        is_currently_active = (trades_last_7d > 0) or (redeems_last_7d > 0)
         recent_activity_ratio = trades_last_30d / num_trades if num_trades > 0 else 0
 
         # === NEW: PERFORMANCE TRAJECTORY (drawdown estimation) ===
@@ -578,8 +816,9 @@ async def fetch_account_metrics(client: DataAPIClient, wallet: str, pnl: float) 
             recent_vs_historical = 1.0
 
         # === CALCULATE PROPER DRAWDOWN METRICS ===
-        # Analyze the full P/L curve to find actual drawdowns
-        drawdown_metrics = calculate_drawdown_metrics(activities, pnl)
+        # Analyze the full P/L curve including both trades AND redemptions
+        # This captures both active trading P/L and resolution P/L
+        drawdown_metrics = calculate_drawdown_metrics(trades, pnl, redeems)
 
         # === ESTIMATE WIN RATE ===
         # Since we don't have per-trade P/L, estimate based on overall metrics
@@ -597,11 +836,18 @@ async def fetch_account_metrics(client: DataAPIClient, wallet: str, pnl: float) 
             # Not profitable
             estimated_win_rate = 0.45
 
-        # Adjust based on trade frequency (more trades with profit = more skill)
-        if num_trades >= 200 and pnl > 0:
-            estimated_win_rate = min(0.80, estimated_win_rate + 0.03)
-        elif num_trades >= 100 and pnl > 0:
-            estimated_win_rate = min(0.80, estimated_win_rate + 0.02)
+        # Use ACTUAL win rate from P/L calculation if available, else fall back to estimate
+        actual_win_rate = drawdown_metrics.get("actual_win_rate")
+        if actual_win_rate and actual_win_rate > 0:
+            # Use real win rate from position tracking
+            final_win_rate = actual_win_rate
+        else:
+            # Fall back to estimate, adjusted by trade frequency
+            if num_trades >= 200 and pnl > 0:
+                estimated_win_rate = min(0.80, estimated_win_rate + 0.03)
+            elif num_trades >= 100 and pnl > 0:
+                estimated_win_rate = min(0.80, estimated_win_rate + 0.02)
+            final_win_rate = estimated_win_rate
 
         metrics = AccountMetrics(
             wallet=wallet,
@@ -619,8 +865,8 @@ async def fetch_account_metrics(client: DataAPIClient, wallet: str, pnl: float) 
             pnl_per_market=pnl_per_market,
             activity_recency_days=activity_recency_days,
             buy_sell_ratio=buy_sell_ratio,
-            # Win rate (estimated)
-            win_rate=estimated_win_rate,
+            # Win rate (actual from P/L tracking)
+            win_rate=final_win_rate,
             # Activity metrics
             trades_last_7d=trades_last_7d,
             trades_last_30d=trades_last_30d,
@@ -641,6 +887,15 @@ async def fetch_account_metrics(client: DataAPIClient, wallet: str, pnl: float) 
             current_drawdown_pct=drawdown_metrics["current_drawdown_pct"],
             pl_curve_smoothness=drawdown_metrics["pl_curve_smoothness"],
             profit_factor=drawdown_metrics["profit_factor"],
+            # Additional P/L metrics
+            avg_win_size=drawdown_metrics.get("avg_win_size", 0),
+            avg_loss_size=drawdown_metrics.get("avg_loss_size", 0),
+            gross_profit=drawdown_metrics.get("gross_profit", 0),
+            gross_loss=drawdown_metrics.get("gross_loss", 0),
+            sharpe_ratio=drawdown_metrics.get("sharpe_ratio", 0),
+            # Win/loss counts
+            profitable_trades=drawdown_metrics.get("win_count", 0),
+            losing_trades=drawdown_metrics.get("loss_count", 0),
             # Metadata
             trades_fetched=num_trades,
         )
@@ -660,18 +915,10 @@ async def fetch_account_metrics(client: DataAPIClient, wallet: str, pnl: float) 
 def calculate_systematic_score(m: AccountMetrics) -> tuple[float, dict]:
     """
     Calculate how "systematic" a trader appears to be.
-    Higher = more likely to be consistently profitable, not just lucky.
+    Higher = more likely to be consistently profitable.
 
-    Mission: Find "consistently profitable active trader with appealing P/L curve"
-
-    CRITICAL FACTORS (in order of importance):
-    1. CURRENT ACTIVITY - Dead accounts are worthless for copy-trading
-    2. WIN RATE - Consistency of profitable trades
-    3. PNL EFFICIENCY - How much profit per trade/market
-    4. POSITION SIZING - Consistent, controlled sizing (appealing P/L curve)
-    5. DIVERSIFICATION - Not one-trick pony, actual skill
-    6. TRADE VOLUME - More data = more reliable signal
-    7. ACCOUNT AGE - Proven over time
+    PHILOSOPHY: If they're profitable, don't penalize minor things.
+    Focus on: PROFITABILITY, ACTIVITY, and RISK MANAGEMENT.
 
     Returns:
         (score, breakdown) - Score 0-100 and dict of component scores
@@ -680,59 +927,53 @@ def calculate_systematic_score(m: AccountMetrics) -> tuple[float, dict]:
     score = 50  # Start neutral
 
     # ==========================================================================
-    # 1. CRITICAL: ACTIVITY RECENCY (This is the #1 factor)
+    # 1. ACTIVITY RECENCY - Must be actively trading
     # ==========================================================================
-    # We ONLY want actively trading accounts. Dead accounts are worthless.
-
     activity_score = 0
     if m.is_currently_active:  # Traded in last 7 days
-        activity_score = 20  # Big bonus for being active NOW
+        activity_score = 20
     elif m.activity_recency_days <= 14:
-        activity_score = 12  # Recently active
+        activity_score = 15
     elif m.activity_recency_days <= 30:
-        activity_score = 5  # Somewhat active
+        activity_score = 8
     elif m.activity_recency_days <= 60:
-        activity_score = -10  # Getting stale
+        activity_score = 0  # Neutral, not penalized
     elif m.activity_recency_days <= 90:
-        activity_score = -20  # Probably abandoned
+        activity_score = -5  # Slight concern
     else:
-        activity_score = -35  # Dead account - massive penalty
+        activity_score = -15  # Dead account
 
-    # Recent trading volume (last 30 days)
+    # Recent trading volume bonus (no penalty for low volume)
     if m.trades_last_30d >= 50:
-        activity_score += 12
+        activity_score += 10
     elif m.trades_last_30d >= 20:
-        activity_score += 8
+        activity_score += 6
     elif m.trades_last_30d >= 10:
-        activity_score += 4
-    elif m.trades_last_30d < 3:
-        activity_score -= 8
+        activity_score += 3
 
     breakdown["activity"] = activity_score
     score += activity_score
 
     # ==========================================================================
-    # 2. WIN RATE (new critical factor for "consistently profitable")
+    # 2. WIN RATE - Key profitability indicator
     # ==========================================================================
     win_score = 0
     if m.win_rate >= 0.65:
-        win_score = 15  # Excellent win rate
+        win_score = 15
     elif m.win_rate >= 0.55:
-        win_score = 10  # Good win rate
+        win_score = 10
     elif m.win_rate >= 0.50:
-        win_score = 5  # Neutral
+        win_score = 5
     elif m.win_rate >= 0.45:
-        win_score = 0
-    elif m.win_rate >= 0.40:
-        win_score = -5
+        win_score = 2  # Still OK if profitable overall
     else:
-        win_score = -10  # Poor win rate
+        win_score = 0  # Don't penalize - they might have big wins
 
     breakdown["win_rate"] = win_score
     score += win_score
 
     # ==========================================================================
-    # 3. PNL EFFICIENCY (profit per trade matters for "appealing P/L curve")
+    # 3. PNL EFFICIENCY - Profit per trade (bonuses only, no penalties)
     # ==========================================================================
     efficiency_score = 0
     if m.pnl_per_trade >= 500:
@@ -743,10 +984,11 @@ def calculate_systematic_score(m: AccountMetrics) -> tuple[float, dict]:
         efficiency_score = 6
     elif m.pnl_per_trade >= 50:
         efficiency_score = 3
-    elif m.pnl_per_trade < 10:
-        efficiency_score = -5
+    elif m.pnl_per_trade >= 20:
+        efficiency_score = 1
+    # No penalty for low efficiency - profit is profit
 
-    # Per-market efficiency
+    # Per-market efficiency bonus
     if m.pnl_per_market >= 5000:
         efficiency_score += 5
     elif m.pnl_per_market >= 2000:
@@ -756,51 +998,46 @@ def calculate_systematic_score(m: AccountMetrics) -> tuple[float, dict]:
     score += efficiency_score
 
     # ==========================================================================
-    # 4. POSITION SIZING CONSISTENCY (key for "appealing P/L curve")
+    # 4. POSITION SIZING - Bonus for consistency, minimal penalties
     # ==========================================================================
     sizing_score = 0
     if m.position_consistency >= 0.7:
-        sizing_score = 10  # Very consistent sizing
+        sizing_score = 8
     elif m.position_consistency >= 0.5:
-        sizing_score = 6
+        sizing_score = 5
     elif m.position_consistency >= 0.3:
         sizing_score = 2
-    elif m.position_consistency < 0.2:
-        sizing_score = -8  # Erratic sizing = ugly P/L curve
+    # No penalty for variable sizing - some strategies require it
 
-    # Max position vs average - detect whale bets that distort P/L
+    # Bonus for controlled max position (not penalty for large)
     if m.avg_position > 0:
         max_to_avg_ratio = m.max_position / m.avg_position
-        if max_to_avg_ratio > 20:
-            sizing_score -= 10  # One massive bet dominates
-        elif max_to_avg_ratio > 10:
-            sizing_score -= 5
-        elif max_to_avg_ratio < 3:
-            sizing_score += 5  # Controlled sizing = clean P/L
+        if max_to_avg_ratio < 3:
+            sizing_score += 4  # Very controlled sizing
 
     breakdown["sizing"] = sizing_score
     score += sizing_score
 
     # ==========================================================================
-    # 5. MARKET DIVERSIFICATION (not one-trick pony)
+    # 5. MARKET FOCUS - Fewer markets = more focused strategy (GOOD)
     # ==========================================================================
-    diversity_score = 0
-    if m.unique_markets >= 50:
-        diversity_score = 10
-    elif m.unique_markets >= 25:
-        diversity_score = 7
-    elif m.unique_markets >= 15:
-        diversity_score = 4
-    elif m.unique_markets >= 10:
-        diversity_score = 2
-    elif m.unique_markets < 5:
-        diversity_score = -8  # Too concentrated, could be luck
+    focus_score = 0
+    if m.unique_markets <= 5:
+        focus_score = 10  # Highly focused specialist
+    elif m.unique_markets <= 10:
+        focus_score = 8  # Focused strategy
+    elif m.unique_markets <= 20:
+        focus_score = 5  # Moderate focus
+    elif m.unique_markets <= 50:
+        focus_score = 2  # Some diversification
+    else:
+        focus_score = 0  # Very diversified (neutral)
 
-    breakdown["diversification"] = diversity_score
-    score += diversity_score
+    breakdown["focus"] = focus_score
+    score += focus_score
 
     # ==========================================================================
-    # 6. TRADE VOLUME (more trades = more reliable signal)
+    # 6. TRADE VOLUME - More data = more reliable (bonuses only)
     # ==========================================================================
     volume_score = 0
     if m.num_trades >= 500:
@@ -811,90 +1048,67 @@ def calculate_systematic_score(m: AccountMetrics) -> tuple[float, dict]:
         volume_score = 3
     elif m.num_trades >= 50:
         volume_score = 1
-    elif m.num_trades < 20:
-        volume_score = -5
+    # No penalty for fewer trades - quality over quantity
 
     breakdown["volume"] = volume_score
     score += volume_score
 
     # ==========================================================================
-    # 7. DRAWDOWN / RISK METRICS (Using proper P/L curve analysis)
+    # 7. RISK METRICS - Drawdown and P/L curve quality
     # ==========================================================================
-    drawdown_score = 0
+    risk_score = 0
 
-    # Max drawdown is the primary risk indicator
+    # Max drawdown - the primary risk indicator
     if m.max_drawdown_pct <= 5:
-        drawdown_score = 12  # Excellent risk control
+        risk_score = 12
     elif m.max_drawdown_pct <= 10:
-        drawdown_score = 8  # Good
+        risk_score = 8
     elif m.max_drawdown_pct <= 15:
-        drawdown_score = 4  # Acceptable
+        risk_score = 5
     elif m.max_drawdown_pct <= 25:
-        drawdown_score = 0  # Neutral
+        risk_score = 2
     elif m.max_drawdown_pct <= 35:
-        drawdown_score = -8  # Concerning
+        risk_score = 0  # Neutral
     else:
-        drawdown_score = -15  # High risk
+        risk_score = -5  # Only penalize severe drawdowns
 
-    # Average drawdown matters too - frequent moderate drawdowns are bad
-    if m.avg_drawdown_pct <= 3:
-        drawdown_score += 5
-    elif m.avg_drawdown_pct <= 8:
-        drawdown_score += 2
-    elif m.avg_drawdown_pct >= 15:
-        drawdown_score -= 5
-
-    # Severe drawdown frequency (>15% drawdowns)
-    if m.severe_drawdown_count == 0:
-        drawdown_score += 4  # Never had a severe drawdown
-    elif m.severe_drawdown_count >= 3:
-        drawdown_score -= 8  # Multiple severe drawdowns = risky
-
-    # Currently in drawdown is a warning sign
-    if m.current_drawdown_pct > 10:
-        drawdown_score -= 5  # Currently struggling
-    elif m.current_drawdown_pct > 20:
-        drawdown_score -= 10  # In deep trouble
-
-    # P/L curve smoothness (appealing curve)
+    # P/L curve smoothness bonus
     if m.pl_curve_smoothness >= 0.8:
-        drawdown_score += 6  # Very smooth curve
+        risk_score += 6
     elif m.pl_curve_smoothness >= 0.6:
-        drawdown_score += 3  # Reasonably smooth
-    elif m.pl_curve_smoothness < 0.3:
-        drawdown_score -= 5  # Volatile, ugly curve
+        risk_score += 3
+    elif m.pl_curve_smoothness >= 0.4:
+        risk_score += 1
 
-    # Profit factor (gross profit / gross loss)
+    # Profit factor bonus (no penalty)
     if m.profit_factor >= 2.0:
-        drawdown_score += 5  # Excellent profit factor
+        risk_score += 5
     elif m.profit_factor >= 1.5:
-        drawdown_score += 2
-    elif m.profit_factor < 1.0:
-        drawdown_score -= 5  # More losses than wins
+        risk_score += 3
+    elif m.profit_factor >= 1.2:
+        risk_score += 1
 
-    breakdown["drawdown"] = drawdown_score
-    score += drawdown_score
+    breakdown["risk"] = risk_score
+    score += risk_score
 
     # ==========================================================================
-    # 8. PERFORMANCE TRAJECTORY (recent vs historical)
+    # 8. TRAJECTORY - Recent performance vs historical
     # ==========================================================================
     trajectory_score = 0
-
-    # Recent vs historical performance
     if m.recent_vs_historical >= 1.2:
         trajectory_score = 8  # Getting better
     elif m.recent_vs_historical >= 0.9:
         trajectory_score = 4  # Consistent
     elif m.recent_vs_historical >= 0.7:
-        trajectory_score = 0  # Slight decline
-    elif m.recent_vs_historical < 0.5:
-        trajectory_score = -10  # Declining badly
+        trajectory_score = 1  # Slight decline (minimal impact)
+    else:
+        trajectory_score = 0  # Don't penalize - could be temporary
 
     breakdown["trajectory"] = trajectory_score
     score += trajectory_score
 
     # ==========================================================================
-    # 9. ACCOUNT LONGEVITY (proven over time)
+    # 9. ACCOUNT AGE - Bonus for longevity (no penalty for new)
     # ==========================================================================
     longevity_score = 0
     if m.account_age_days >= 365:
@@ -903,8 +1117,7 @@ def calculate_systematic_score(m: AccountMetrics) -> tuple[float, dict]:
         longevity_score = 3
     elif m.account_age_days >= 90:
         longevity_score = 1
-    elif m.account_age_days < 30:
-        longevity_score = -5
+    # No penalty for new accounts - they might be great
 
     breakdown["longevity"] = longevity_score
     score += longevity_score

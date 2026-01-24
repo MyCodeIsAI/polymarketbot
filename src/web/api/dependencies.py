@@ -13,6 +13,10 @@ from typing import Optional, Generator
 from ...database import DatabaseConfig, DatabaseManager, configure_database
 from ...utils.logging import get_logger
 
+# Import insider scanner models to ensure tables are created
+# This must happen before configure_database() is called
+from ...insider_scanner import models as insider_models
+
 logger = get_logger(__name__)
 
 # Global database instance
@@ -42,6 +46,23 @@ def get_db() -> DatabaseManager:
         _db = configure_database(config)
 
     return _db
+
+
+def get_session() -> Generator:
+    """Get a database session for query operations.
+
+    Yields:
+        SQLAlchemy Session instance
+
+    Usage in routes:
+        @router.get("/example")
+        async def example(db=Depends(get_session)):
+            results = db.query(Model).all()
+    """
+    db_manager = get_db()
+    # Use the session context manager from DatabaseManager
+    with db_manager.session() as session:
+        yield session
 
 
 def get_bot_state() -> dict:

@@ -145,6 +145,25 @@ class PLCurveMetrics:
     largest_win_pct_of_total: float
     top_3_wins_pct_of_total: float
     avg_recovery_time_days: float
+    # Win/loss counts
+    win_count: int = 0
+    loss_count: int = 0
+    gross_profit: Decimal = Decimal("0")
+    gross_loss: Decimal = Decimal("0")
+
+    # Copytrade viability metrics (added based on empirical analysis)
+    # These help identify traders whose returns are copyable vs luck-dependent
+    top_5_wins_pct_of_total: float = 0.0  # Extended concentration check
+    top_10_wins_pct_of_total: float = 0.0  # Even more distribution check
+    market_win_rate: float = 0.0  # % of unique markets that were profitable
+    markets_profitable: int = 0  # Count of unique markets with profit
+    markets_unprofitable: int = 0  # Count of unique markets with loss
+    redemption_win_count: int = 0  # Wins from holding to resolution
+    sell_win_count: int = 0  # Wins from selling early
+    redemption_pct_of_profit: float = 0.0  # What % of profits came from resolutions
+    # Simulated capture analysis (what % of profit at random capture rates)
+    simulated_50pct_capture_median: float = 0.0  # Median P/L capturing 50% of trades
+    simulated_25pct_capture_median: float = 0.0  # Median P/L capturing 25% of trades
 
 
 @dataclass
@@ -177,6 +196,14 @@ class TradingPatternMetrics:
 
     avg_hold_time_hours: float
     pct_trades_near_expiry: float
+
+    # Activity recency and trade direction
+    days_since_last_trade: int = 0
+    buy_sell_ratio: float = 0.5  # Ratio of buys to total trades
+
+    # Primary category classification
+    primary_category: str = "Diversified"  # Crypto, Politics, Sports, Finance, Weather, Tech, Culture, Diversified
+    category_concentration: float = 0.0  # How concentrated they are in their primary category (0.0-1.0)
 
 
 @dataclass

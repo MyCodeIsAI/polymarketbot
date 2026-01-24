@@ -1,0 +1,181 @@
+{
+  "generated_at": "2026-01-24T22:16:43.410226",
+  "sources": {
+    "0xf70da97812cb96acdf810712aa562db8dfa3dbef": {
+      "funded_wallets": [
+        "0x6a72f61820b26b1fe4d956e17b6dc2a1ea3033ee",
+        "0x19ede0cbe4fbd49aa1f73e907526a0a581486dc8"
+      ],
+      "count": 2
+    },
+    "0xc9aaa6ca0e05b87d53a3e51edbc44b406eeaf299": {
+      "funded_wallets": [
+        "0xe24838258b572f1771dffba3bcdde57a78def293",
+        "0x629bc4a1e53e1d475beb7ea3d388791e96dd995a"
+      ],
+      "count": 2
+    },
+    "0x24357454d8d1a0cc93a6c25fd490467372bc2454": {
+      "funded_wallets": [
+        "0x6e82b93eb57b01a63027bd0c6d2f3f04934a752c"
+      ],
+      "count": 1
+    },
+    "0xe7804c37c13166ff0b37f5ae0bb07a3aebb6e245": {
+      "funded_wallets": [
+        "0xdbade4c82fb72780a0db9a38f821d8671aba9c95",
+        "0x66fe8149ec5811c265b882fdade058b81e6ee123",
+        "0x37e053beabee77acc15e641dfe8e395b2b2d024e",
+        "0xcf6c5492124794394dd9eac46498a8babbe47e66",
+        "0xd2678dc3b152a54900f28b0e849afe2049df9dc6",
+        "0xa9e8faf20424f3efbf12abaea0e7069d7546c443",
+        "0xee00ba338c59557141789b127927a55f5cc5cea1"
+      ],
+      "count": 7
+    },
+    "0x4b6f17856215eab57c29ebfa18b0a0f74a3627bb": {
+      "funded_wallets": [
+        "0x37e4728b3c4607fb2b3b205386bb1d1fb1a8c991",
+        "0x30e443872ddf63b2908a49f92cd690c304a55102"
+      ],
+      "count": 2
+    },
+    "0x16caf384c4099ee89389b3f01949b78990ec86c7": {
+      "funded_wallets": [
+        "0x97e12cc7391a50e49042b44a2d4a0cef54c8017b"
+      ],
+      "count": 1
+    },
+    "0xae097eb66d799ea5d6ef6bc8ae9634679c14a717": {
+      "funded_wallets": [
+        "0x18670d5a83b7b38d509398067c095d4c321992ca"
+      ],
+      "count": 1
+    },
+    "0x019d0706d65c4768ec8081ed7ce41f59eef9b86c": {
+      "funded_wallets": [
+        "0x6ade597c0e2b43c0bf3542cada8a5e330d73f5b0"
+      ],
+      "count": 1
+    },
+    "0xd36ec33c8bed5a9f7b6630855f1533455b98a418": {
+      "funded_wallets": [
+        "0x751a2b86cab503496efd325c8344e10159349ea1",
+        "0xd6f44883f664d7dc963d8b89c5a0689fdd330566",
+        "0xdf6da574f8b0c0ce5e01ddb1c5a49b87993e9c5c",
+        "0x90ba2e712cdb5d167f22ef2053333ff1437463f3",
+        "0xd1acd3925d895de9aec98ff95f3a30c5279d08d5",
+        "0x9d84ce0306f8551e02efef1680475fc0f1dc1344",
+        "0x43372356634781eea88d61bbdd7824cdce958882",
+        "0xd81fbc5c53593e4e2923a641ff2bc7e2d9866b75"
+      ],
+      "count": 8
+    },
+    "0xbdf531237210e4e765d524103df71e6027cc2480": {
+      "funded_wallets": [
+        "0x8b3234f9027f4e994e949df4b48b90ab79015950"
+      ],
+      "count": 1
+    },
+    "0x2a5d4f800464007ce4a31cbc1e670e70b51810f1": {
+      "funded_wallets": [
+        "0x44c1dfe43260c94ed4f1d00de2e1f80fb113ebc1"
+      ],
+      "count": 1
+    },
+    "0xd7f6ebdf0235f587154e2d7d38f9d80568494993": {
+      "funded_wallets": [
+        "0x6bab41a0dc40d6dd4c1a915b8c01969479fd1292"
+      ],
+      "count": 1
+    },
+    "0xfa0b641678f5115ad8a8de5752016bd1359681b9": {
+      "funded_wallets": [
+        "0xe3d4dee2427b98042822543f8e1e8ab7bafb2bac",
+        "0xf588b19afe63e1aba00f125f91e3e3b0fdc62b81"
+      ],
+      "count": 2
+    },
+    "0x0c6dc260c9ba771760c2266b8ee50ecf321debc5": {
+      "funded_wallets": [
+        "0xe74a4446efd66a4de690962938f550d8921a40ee"
+      ],
+      "count": 1
+    },
+    "0xfb4200a91eff1f2727fa89927864a5b4aa1bfa12": {
+      "funded_wallets": [
+        "0x84dbb7103982e3617704a2ed7d5b39691952aeeb"
+      ],
+      "count": 1
+    },
+    "0x47b2ee90f2ef32287ae325518613a8789217753f": {
+      "funded_wallets": [
+        "0x6d7776a0f954be1a7c975a1e8244de6268f7b72c"
+      ],
+      "count": 1
+    },
+    "0xcb39c5b0db9c5b6bd1d9273dccc2f98f532a8bc6": {
+      "funded_wallets": [
+        "0xb6bed94e75c333dae24eb9c80b3fef47ef3cfcfe",
+        "0xdd225a03cd7ed89e3931906c67c75ab31cf89ef1",
+        "0xf5cfe6f998d597085e366f915b140e82e0869fc6"
+      ],
+      "count": 3
+    },
+    "0x7ccc6083bb2be4e0eb28eb22aa365bbb9863e76f": {
+      "funded_wallets": [
+        "0x090a0d3fc9d68d3e16db70e3460e3e4b510801b4"
+      ],
+      "count": 1
+    },
+    "0xf89d7b9c864f589bbf53a82105107622b35eaa40": {
+      "funded_wallets": [
+        "0x6ffb4354cbe6e0f9989e3b55564ec5fb8646a834"
+      ],
+      "count": 1
+    },
+    "0x760dce7ea6e8ba224bffbeb8a7ff4dd1ef122bff": {
+      "funded_wallets": [
+        "0x9703676286b93c2eca71ca96e8757104519a69c2",
+        "0xcc500cbcc8b7cf5bd21975ebbea34f21b5644c82"
+      ],
+      "count": 2
+    },
+    "0xd9b329a6bb19c31e07cd68c9623d2b8be8f4a028": {
+      "funded_wallets": [
+        "0x832d13d39011acf2da1b8e56182b0961d02fd420"
+      ],
+      "count": 1
+    },
+    "0x1440ec793ae50fa046b95bfeca5af475b6003f9e": {
+      "funded_wallets": [
+        "0xef2684030d14a67c2a30a3e4fc00eed7a99505ba"
+      ],
+      "count": 1
+    },
+    "0x51e3d44172868acc60d68ca99591ce4230bc75e0": {
+      "funded_wallets": [
+        "0xa849228d5664e59f2b397b68f0429ab10668c825"
+      ],
+      "count": 1
+    },
+    "0x78c5eae5e4477632a4d079bc766281d1bcd28565": {
+      "funded_wallets": [
+        "0x5c57496c97dd151f54b2d727646aa796ced55b16"
+      ],
+      "count": 1
+    },
+    "0x5ac5a3b35f5e85d57529748fa4b2627469ed8247": {
+      "funded_wallets": [
+        "0x4bac379da2f29d87c01ff737843e396a2cec02b1"
+      ],
+      "count": 1
+    },
+    "0xcf0d4b62f0740b91c695a8510402ac2726f380a4": {
+      "funded_wallets": [
+        "0xe5f85d076f0b1edd4ec89bfb95e123a9036a8d75"
+      ],
+      "count": 1
+    }
+  }
+}

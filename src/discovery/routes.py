@@ -9,11 +9,14 @@ Provides endpoints for:
 """
 
 import asyncio
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
+import aiohttp
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Body
 from pydantic import BaseModel, Field
 
@@ -24,6 +27,77 @@ from .service import DiscoveryService, ScanConfig, ScanProgress
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
+
+
+# =============================================================================
+# Profile Views Fetcher
+# =============================================================================
+
+@dataclass
+class ProfileStats:
+    """Profile statistics from Polymarket."""
+    wallet: str
+    views: int
+    username: Optional[str] = None
+
+
+async def fetch_profile_views(wallet: str, session: aiohttp.ClientSession) -> Optional[ProfileStats]:
+    """Fetch profile views for a single wallet."""
+    url = f"https://polymarket.com/profile/{wallet.lower()}"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html',
+    }
+
+    try:
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                return ProfileStats(wallet=wallet.lower(), views=0)
+
+            html = await resp.text()
+
+            views = 0
+            username = None
+
+            views_match = re.search(r'"views":(\d+)', html)
+            if views_match:
+                views = int(views_match.group(1))
+
+            name_match = re.search(r'"username":"([^"]*)"', html)
+            if name_match and name_match.group(1):
+                username = name_match.group(1)
+
+            return ProfileStats(wallet=wallet.lower(), views=views, username=username)
+
+    except Exception:
+        return ProfileStats(wallet=wallet.lower(), views=0)
+
+
+async def fetch_all_profile_views(
+    wallets: list[str],
+    max_concurrent: int = 10,
+    progress_callback: Optional[callable] = None,
+) -> Dict[str, ProfileStats]:
+    """Fetch profile views for all wallets in parallel with rate limiting."""
+    results = {}
+    semaphore = asyncio.Semaphore(max_concurrent)
+    completed = [0]
+    total = len(wallets)
+
+    async with aiohttp.ClientSession() as session:
+        async def fetch_one(wallet: str):
+            async with semaphore:
+                stats = await fetch_profile_views(wallet, session)
+                if stats:
+                    results[wallet.lower()] = stats
+                completed[0] += 1
+                if progress_callback and completed[0] % 50 == 0:
+                    progress_callback(completed[0], total)
+                await asyncio.sleep(0.1)
+
+        await asyncio.gather(*[fetch_one(w) for w in wallets])
+
+    return results
 
 
 # =============================================================================
@@ -72,12 +146,19 @@ class ScanConfigRequest(BaseModel):
     reference_wallet: Optional[str] = Field(None, description="Reference wallet for similar-to mode")
     lookback_days: int = Field(90, ge=7, le=365, description="Days of history to analyze")
     min_score_threshold: float = Field(20.0, ge=0, le=100, description="Minimum score to include")
-    max_candidates: int = Field(5000, ge=10, le=10000, description="Max candidates to collect (Phase 1)")
-    max_phase2: int = Field(1000, ge=5, le=5000, description="Max candidates for Phase 2 light scan")
-    max_phase3: int = Field(200, ge=5, le=500, description="Max candidates for Phase 3 deep analysis")
+    max_candidates: int = Field(5000, ge=10, le=20000, description="Max candidates to collect (Phase 1)")
+    max_phase2: int = Field(1000, ge=5, le=10000, description="Max candidates for Phase 2 light scan")
+    max_phase3: int = Field(200, ge=5, le=5000, description="Max candidates for Phase 3 deep analysis")
     min_trades: int = Field(3, ge=1, description="Minimum trades required")
+    max_trades: Optional[int] = Field(None, ge=1, description="Maximum trades (filter out high-frequency bots)")
+    min_profit: Optional[float] = Field(None, ge=0, description="Minimum profit USD (from leaderboard)")
+    max_profit: Optional[float] = Field(None, ge=0, description="Maximum profit USD (filter out whales)")
+    analyze_top_n: int = Field(500, ge=10, le=5000, description="Number of trades to scrape per account")
     max_avg_position_size: float = Field(100000.0, ge=1, description="Max average position size USD")
     persist_to_db: bool = Field(True, description="Store results in database")
+    track_profile_views: bool = Field(True, description="Fetch profile view counts after scan")
+    # Alias for frontend compatibility
+    trades_limit: Optional[int] = Field(None, description="Alias for analyze_top_n (deprecated)")
 
 
 class ScanResponse(BaseModel):
@@ -310,6 +391,11 @@ async def start_scan(config: ScanConfigRequest, background_tasks: BackgroundTask
         scan_config.lookback_days = config.lookback_days
         scan_config.persist_to_db = config.persist_to_db
     else:
+        # Handle trades_limit alias for analyze_top_n
+        analyze_top_n = config.analyze_top_n
+        if config.trades_limit is not None:
+            analyze_top_n = config.trades_limit
+
         scan_config = ScanConfig(
             mode=mode,
             categories=config.categories,
@@ -321,6 +407,10 @@ async def start_scan(config: ScanConfigRequest, background_tasks: BackgroundTask
             max_phase2=config.max_phase2,
             max_phase3=config.max_phase3,
             min_trades=config.min_trades,
+            max_trades=config.max_trades,
+            min_profit=config.min_profit,
+            max_profit=config.max_profit,
+            analyze_top_n=analyze_top_n,
             max_avg_position_size=config.max_avg_position_size,
             persist_to_db=config.persist_to_db,
         )
@@ -375,6 +465,31 @@ async def start_scan(config: ScanConfigRequest, background_tasks: BackgroundTask
                 })
 
             results, scan = await service.run_scan(scan_config, progress_callback)
+
+            # Fetch profile views if enabled
+            if config.track_profile_views and results:
+                _scan_records[scan_id].update({
+                    "current_step": f"Fetching profile views for {len(results)} accounts...",
+                    "current_phase": "phase4_views",
+                })
+
+                def views_progress(completed: int, total: int):
+                    _scan_records[scan_id]["current_step"] = f"Fetching views: {completed}/{total}..."
+
+                wallets = [r.get("wallet_address", "") for r in results if r.get("wallet_address")]
+                profile_views = await fetch_all_profile_views(wallets, max_concurrent=10, progress_callback=views_progress)
+
+                # Attach views to results
+                for result in results:
+                    wallet_lower = result.get("wallet_address", "").lower()
+                    if wallet_lower in profile_views:
+                        result["profile_views"] = profile_views[wallet_lower].views
+                        result["profile_username"] = profile_views[wallet_lower].username
+                    else:
+                        result["profile_views"] = 0
+                        result["profile_username"] = None
+
+                logger.info("profile_views_fetched", count=len(profile_views))
 
             # Store results
             _scan_results[scan_id] = results
@@ -469,11 +584,188 @@ async def cancel_scan(scan_id: int):
     return {"message": "Scan cancelled"}
 
 
+@router.get("/checkpoint")
+async def get_checkpoint():
+    """Get current checkpoint data for resume capability.
+
+    Returns checkpoint data if a scan was interrupted, or null if no checkpoint exists.
+    Use this to offer resume functionality after a crash or browser close.
+    """
+    checkpoint = DiscoveryService.load_checkpoint_from_file()
+
+    if not checkpoint:
+        return {"checkpoint": None, "message": "No checkpoint found"}
+
+    return {
+        "checkpoint": checkpoint,
+        "can_resume": True,
+        "processed_count": checkpoint.get("processed_count", 0),
+        "phase": checkpoint.get("phase"),
+        "timestamp": checkpoint.get("timestamp"),
+    }
+
+
+@router.post("/scan/resume")
+async def resume_scan(config: ScanConfigRequest, background_tasks: BackgroundTasks):
+    """Resume a scan from checkpoint.
+
+    Loads checkpoint data and starts a new scan that skips already-processed wallets.
+    The exclude_wallets in the scan config will be populated from the checkpoint.
+    """
+    global _scan_counter, _active_scan_task
+
+    # Check if scan is already running
+    if _active_scan_task and not _active_scan_task.done():
+        raise HTTPException(status_code=409, detail="A scan is already in progress")
+
+    # Load checkpoint
+    checkpoint = DiscoveryService.load_checkpoint_from_file()
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="No checkpoint found to resume from")
+
+    processed_wallets = checkpoint.get("processed_wallets", [])
+
+    # Validate mode
+    try:
+        mode = DiscoveryMode(config.mode)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid mode: {config.mode}")
+
+    # Create scan config with exclude_wallets from checkpoint
+    scan_config = ScanConfig(
+        mode=mode,
+        categories=config.categories,
+        market_ids=config.market_ids,
+        reference_wallet=config.reference_wallet,
+        lookback_days=config.lookback_days,
+        min_score_threshold=config.min_score_threshold,
+        max_candidates=config.max_candidates,
+        max_phase2=config.max_phase2,
+        max_phase3=config.max_phase3,
+        min_trades=config.min_trades,
+        max_trades=config.max_trades,
+        max_profit=config.max_profit,
+        max_avg_position_size=config.max_avg_position_size,
+        persist_to_db=config.persist_to_db,
+        exclude_wallets=processed_wallets,  # Skip already-processed wallets
+    )
+
+    # Create scan record
+    _scan_counter += 1
+    scan_id = _scan_counter
+
+    _scan_records[scan_id] = {
+        "scan_id": scan_id,
+        "status": ScanStatus.RUNNING.value,
+        "progress_pct": 0,
+        "current_step": f"Resuming from checkpoint ({len(processed_wallets)} already processed)...",
+        "current_phase": "init",
+        "candidates_found": 0,
+        "candidates_analyzed": 0,
+        "candidates_passed": 0,
+        "started_at": datetime.utcnow().isoformat(),
+        "completed_at": None,
+        "config": config.model_dump(),
+        "resumed_from_checkpoint": True,
+        "skipped_wallets": len(processed_wallets),
+        # Phase stats
+        "phase1_total": 0,
+        "phase1_passed": 0,
+        "phase2_total": 0,
+        "phase2_passed": 0,
+        "phase3_total": 0,
+        "phase3_passed": 0,
+        "api_calls_made": 0,
+    }
+
+    # Start scan in background (same as start_scan)
+    async def run_scan():
+        try:
+            service = await get_discovery_service()
+
+            def progress_callback(progress: ScanProgress):
+                _scan_records[scan_id].update({
+                    "status": progress.status.value,
+                    "progress_pct": progress.progress_pct,
+                    "current_step": progress.current_step,
+                    "current_phase": progress.current_phase,
+                    "candidates_found": progress.candidates_found,
+                    "candidates_analyzed": progress.candidates_analyzed,
+                    "candidates_passed": progress.candidates_passed,
+                    "phase1_total": progress.phase1_total,
+                    "phase1_passed": progress.phase1_passed,
+                    "phase2_total": progress.phase2_total,
+                    "phase2_passed": progress.phase2_passed,
+                    "phase3_total": progress.phase3_total,
+                    "phase3_passed": progress.phase3_passed,
+                    "api_calls_made": progress.api_calls_made,
+                })
+
+            results, scan = await service.run_scan(scan_config, progress_callback)
+
+            # Store results
+            _scan_results[scan_id] = results
+            _scan_records[scan_id].update({
+                "status": scan.status.value,
+                "progress_pct": 100,
+                "current_step": f"Complete: {len(results)} accounts found",
+                "current_phase": "complete",
+                "completed_at": datetime.utcnow().isoformat(),
+                "candidates_found": scan.candidates_found,
+                "candidates_analyzed": scan.candidates_analyzed,
+                "candidates_passed": scan.candidates_passed,
+            })
+
+            # Add to discovered accounts
+            for account in results:
+                wallet = account["wallet_address"]
+                _discovered_accounts[wallet] = {
+                    **account,
+                    "is_favorite": False,
+                    "is_hidden": False,
+                    "discovered_at": datetime.utcnow().isoformat(),
+                }
+
+            logger.info("resumed_scan_completed", scan_id=scan_id, passed=len(results),
+                       skipped=len(processed_wallets))
+
+        except Exception as e:
+            logger.error("resumed_scan_failed", scan_id=scan_id, error=str(e))
+            _scan_records[scan_id].update({
+                "status": ScanStatus.FAILED.value,
+                "current_step": f"Error: {str(e)}",
+            })
+
+    _active_scan_task = asyncio.create_task(run_scan())
+
+    return ScanResponse(
+        scan_id=scan_id,
+        status=ScanStatus.RUNNING.value,
+        progress_pct=0,
+        current_step=f"Resuming from checkpoint ({len(processed_wallets)} wallets skipped)...",
+        current_phase="init",
+        candidates_found=0,
+        candidates_analyzed=0,
+        candidates_passed=0,
+        started_at=_scan_records[scan_id]["started_at"],
+    )
+
+
+@router.delete("/checkpoint")
+async def clear_checkpoint():
+    """Clear the checkpoint file.
+
+    Use this when you want to start fresh instead of resuming.
+    """
+    DiscoveryService.clear_checkpoint_file()
+    return {"message": "Checkpoint cleared"}
+
+
 @router.get("/scan/{scan_id}/results")
 async def get_scan_results(
     scan_id: int,
     min_score: float = Query(0, ge=0, le=100),
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=10000),
     offset: int = Query(0, ge=0),
     hide_flagged: bool = Query(False),
     sort_by: str = Query("composite_score"),
@@ -501,8 +793,9 @@ async def get_scan_results(
     if sort_by == "composite_score":
         filtered.sort(key=lambda x: x.get("composite_score", 0), reverse=True)
     elif sort_by == "total_pnl":
+        # Prefer authoritative total_pnl (from leaderboard) over computed pl_metrics value
         filtered.sort(
-            key=lambda x: float(x.get("pl_metrics", {}).get("total_realized_pnl", "0") or "0"),
+            key=lambda x: float(x.get("total_pnl") or x.get("pl_metrics", {}).get("total_realized_pnl", "0") or "0"),
             reverse=True
         )
     elif sort_by == "red_flag_count":
@@ -557,7 +850,8 @@ async def list_discovered_accounts(
     if sort_by == "composite_score":
         accounts.sort(key=lambda x: x.get("composite_score", 0), reverse=reverse)
     elif sort_by == "total_pnl":
-        accounts.sort(key=lambda x: float(x.get("pl_metrics", {}).get("total_realized_pnl", "0") or "0"), reverse=reverse)
+        # Prefer authoritative total_pnl (from leaderboard) over computed pl_metrics value
+        accounts.sort(key=lambda x: float(x.get("total_pnl") or x.get("pl_metrics", {}).get("total_realized_pnl", "0") or "0"), reverse=reverse)
     elif sort_by == "total_trades":
         accounts.sort(key=lambda x: x.get("pattern_metrics", {}).get("total_trades", 0) or 0, reverse=reverse)
     elif sort_by == "red_flag_count":
@@ -612,10 +906,14 @@ async def get_account_detail(wallet_address: str):
 @router.post("/accounts/{wallet_address}/analyze")
 async def reanalyze_account(
     wallet_address: str,
-    mode: str = Query("niche_specialist"),
-    lookback_days: int = Query(90, ge=7, le=365),
+    mode: str = Query("wide_net_profitability"),
+    lookback_days: int = Query(1825, ge=7, le=1825),
 ):
-    """Reanalyze a specific account with custom settings."""
+    """Reanalyze a specific account with full trade history.
+
+    Default lookback is 1825 days (5 years) to capture complete trade history
+    for accurate P/L and win rate metrics.
+    """
     wallet = wallet_address.lower()
 
     try:
@@ -753,6 +1051,8 @@ async def get_analyzed_accounts(
     min_trades: int = Query(0, ge=0),
     min_markets: int = Query(0, ge=0),
     max_recency_days: int = Query(9999, ge=0),
+    max_profile_views: int = Query(None, ge=0, description="Exclude accounts with more than N profile views"),
+    min_profile_views: int = Query(0, ge=0, description="Only include accounts with at least N profile views"),
     hide_dismissed: bool = Query(True),
     hide_watchlisted: bool = Query(False),
     limit: int = Query(50, ge=1, le=10000),
@@ -768,6 +1068,8 @@ async def get_analyzed_accounts(
     - min_trades: Minimum trade count
     - min_markets: Minimum unique markets traded
     - max_recency_days: Only accounts active within N days
+    - max_profile_views: Exclude accounts with too many profile views (find hidden gems)
+    - min_profile_views: Only include accounts with minimum profile visibility
     """
     import json
     from pathlib import Path
@@ -816,6 +1118,13 @@ async def get_analyzed_accounts(
         if a.get("activity_recency_days", 9999) > max_recency_days:
             continue
 
+        # Profile views filter
+        views = a.get("profile_views", 0)
+        if max_profile_views is not None and views > max_profile_views:
+            continue
+        if views < min_profile_views:
+            continue
+
         # Add status flags
         a["is_watchlisted"] = wallet in _watchlist
         a["is_dismissed"] = wallet in _dismissed
@@ -834,6 +1143,7 @@ async def get_analyzed_accounts(
         "activity_recency_days": lambda x: -x.get("activity_recency_days", 9999),  # Lower is better
         "trades_last_7d": lambda x: x.get("trades_last_7d", 0),
         "trades_last_30d": lambda x: x.get("trades_last_30d", 0),
+        "profile_views": lambda x: x.get("profile_views", 0),  # Sort by popularity
     }
     filtered.sort(key=sort_keys.get(sort_by, sort_keys["systematic_score"]), reverse=reverse)
 
@@ -846,6 +1156,7 @@ async def get_analyzed_accounts(
         "total_collected": data.get("total_collected", 0),
         "total_analyzed": data.get("total_analyzed", 0),
         "pnl_distribution": data.get("pnl_distribution", {}),
+        "views_distribution": data.get("views_distribution", {}),
         "total": total,
         "total_dismissed": len(_dismissed),
         "total_watchlisted": len(_watchlist),
@@ -853,6 +1164,493 @@ async def get_analyzed_accounts(
         "limit": limit,
         "accounts": paginated,
     }
+
+
+@router.get("/insider-suspects")
+async def get_insider_suspects(
+    min_score: float = Query(0, ge=0, le=100),
+    priority: str = Query(None, description="Filter by priority: critical, high, medium, low"),
+    sort_by: str = Query("insider_score", description="Sort field"),
+    reverse: bool = Query(True, description="Descending order"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=10000),
+):
+    """
+    Get accounts flagged as insider suspects from the insider probe results.
+
+    These are accounts that match patterns documented in known insider trading cases.
+    """
+    import json
+    from pathlib import Path
+
+    data_file = Path("/home/user/Documents/polymarketbot/data/insider_probe_results.json")
+
+    if not data_file.exists():
+        return {
+            "error": "Insider probe results not found. Run scripts/insider_probe.py first.",
+            "total": 0,
+            "accounts": [],
+        }
+
+    with open(data_file) as f:
+        data = json.load(f)
+
+    accounts = data.get("accounts", [])
+
+    # Apply filters
+    filtered = []
+    for acc in accounts:
+        # Min score filter
+        score = acc.get("insider_score", 0)
+        if score < min_score:
+            continue
+
+        # Priority filter
+        if priority:
+            acc_priority = acc.get("priority", "").lower()
+            if acc_priority != priority.lower():
+                continue
+
+        # Skip dismissed accounts
+        wallet = acc.get("wallet_address", "").lower()
+        if wallet in _dismissed:
+            continue
+
+        filtered.append(acc)
+
+    # Sort
+    sort_keys = {
+        "insider_score": lambda x: x.get("insider_score", 0),
+        "total_pnl": lambda x: x.get("total_pnl", 0),
+        "win_rate": lambda x: x.get("win_rate", 0),
+        "account_age_days": lambda x: x.get("account_age_days", 0),
+        "num_trades": lambda x: x.get("num_trades", 0),
+    }
+    filtered.sort(key=sort_keys.get(sort_by, sort_keys["insider_score"]), reverse=reverse)
+
+    # Paginate
+    total = len(filtered)
+    paginated = filtered[offset:offset + limit]
+
+    return {
+        "generated_at": data.get("generated_at"),
+        "config": data.get("config", {}),
+        "stats": data.get("stats", {}),
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "accounts": paginated,
+    }
+
+
+# =============================================================================
+# Preset Scan Runners
+# =============================================================================
+
+# Track running preset scans
+_preset_scans: Dict[str, Dict] = {}
+
+
+class PresetScanStatus(BaseModel):
+    """Status of a preset scan."""
+    scan_type: str
+    status: str  # pending, running, completed, error
+    progress_pct: float = 0
+    message: str = ""
+    accounts_found: int = 0
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+
+
+class PresetScanRequest(BaseModel):
+    """Request to run a preset scan."""
+    use_cache: bool = False  # True = load from cache, False = run new scan
+    import_to_scanner: bool = True  # Auto-import results to scanner watchlist
+
+
+def _get_cache_info(result_file: str) -> Optional[Dict]:
+    """Get information about cached scan results."""
+    from pathlib import Path
+    import json
+    import os
+
+    path = Path(result_file)
+    if not path.exists():
+        return None
+
+    try:
+        with open(path) as f:
+            data = json.load(f)
+
+        stat = os.stat(path)
+        return {
+            "exists": True,
+            "generated_at": data.get("generated_at"),
+            "accounts_count": len(data.get("accounts", [])) or data.get("stats", {}).get("total_flagged", 0),
+            "file_size_kb": stat.st_size // 1024,
+            "last_modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+        }
+    except Exception:
+        return None
+
+
+@router.get("/preset/cache-info")
+async def get_preset_cache_info():
+    """Get information about cached preset scan results.
+
+    Returns the last run time and account count for each preset,
+    helping users decide whether to use cache or run a new scan.
+    """
+    return {
+        "mass_scan": _get_cache_info("/home/user/Documents/polymarketbot/data/analyzed_accounts.json"),
+        "insider_probe": _get_cache_info("/home/user/Documents/polymarketbot/data/insider_probe_results.json"),
+    }
+
+
+@router.post("/preset/mass-scan")
+async def run_mass_scan_preset(
+    background_tasks: BackgroundTasks,
+    request: PresetScanRequest = PresetScanRequest()
+):
+    """Run the mass scan preset to find profitable traders.
+
+    Options:
+    - use_cache=true: Load from existing cached results (fast)
+    - use_cache=false: Run a new scan (slow, ~5-10 min)
+
+    This executes the scripts/mass_scan.py logic in the background.
+    """
+    import json
+    from pathlib import Path
+
+    result_file = Path("/home/user/Documents/polymarketbot/data/analyzed_accounts.json")
+    scan_id = f"mass_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    # Handle cache mode
+    if request.use_cache:
+        if not result_file.exists():
+            raise HTTPException(status_code=404, detail="No cached mass scan results found. Run a new scan first.")
+
+        try:
+            with open(result_file) as f:
+                data = json.load(f)
+            accounts_found = len(data.get("accounts", []))
+
+            _preset_scans[scan_id] = {
+                "scan_type": "mass_scan",
+                "status": "completed",
+                "progress_pct": 100,
+                "message": f"Loaded {accounts_found} accounts from cache",
+                "accounts_found": accounts_found,
+                "started_at": datetime.now().isoformat(),
+                "completed_at": datetime.now().isoformat(),
+                "error": None,
+                "from_cache": True,
+                "cache_date": data.get("generated_at"),
+            }
+
+            return {"scan_id": scan_id, "message": f"Loaded {accounts_found} accounts from cache", "from_cache": True}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to load cache: {str(e)}")
+
+    # Check if already running
+    if any(s["status"] == "running" and s["scan_type"] == "mass_scan" for s in _preset_scans.values()):
+        raise HTTPException(status_code=409, detail="Mass scan already running")
+
+    _preset_scans[scan_id] = {
+        "scan_type": "mass_scan",
+        "status": "running",
+        "progress_pct": 0,
+        "message": "Starting mass scan...",
+        "accounts_found": 0,
+        "started_at": datetime.now().isoformat(),
+        "completed_at": None,
+        "error": None,
+        "from_cache": False,
+    }
+
+    async def run_scan():
+        try:
+            script_path = Path("/home/user/Documents/polymarketbot/scripts/mass_scan.py")
+            if not script_path.exists():
+                _preset_scans[scan_id]["status"] = "error"
+                _preset_scans[scan_id]["error"] = "mass_scan.py not found"
+                return
+
+            _preset_scans[scan_id]["message"] = "Running mass scan..."
+            _preset_scans[scan_id]["progress_pct"] = 10
+
+            # Run the script
+            process = await asyncio.create_subprocess_exec(
+                "python3", str(script_path),
+                cwd="/home/user/Documents/polymarketbot",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                # Load results
+                if result_file.exists():
+                    with open(result_file) as f:
+                        data = json.load(f)
+                    _preset_scans[scan_id]["accounts_found"] = len(data.get("accounts", []))
+
+                _preset_scans[scan_id]["status"] = "completed"
+                _preset_scans[scan_id]["progress_pct"] = 100
+                _preset_scans[scan_id]["message"] = f"Complete! Found {_preset_scans[scan_id]['accounts_found']} accounts"
+            else:
+                _preset_scans[scan_id]["status"] = "error"
+                _preset_scans[scan_id]["error"] = stderr.decode()[:500]
+                _preset_scans[scan_id]["message"] = "Scan failed"
+
+            _preset_scans[scan_id]["completed_at"] = datetime.now().isoformat()
+
+        except Exception as e:
+            _preset_scans[scan_id]["status"] = "error"
+            _preset_scans[scan_id]["error"] = str(e)
+            _preset_scans[scan_id]["completed_at"] = datetime.now().isoformat()
+
+    background_tasks.add_task(run_scan)
+
+    return {"scan_id": scan_id, "message": "Mass scan started"}
+
+
+@router.post("/preset/insider-probe")
+async def run_insider_probe_preset(
+    background_tasks: BackgroundTasks,
+    request: PresetScanRequest = PresetScanRequest()
+):
+    """Run the insider probe preset to find suspicious accounts.
+
+    Options:
+    - use_cache=true: Load from existing cached results (fast)
+    - use_cache=false: Run a new scan with --historical flag (slow, ~8-10 min)
+
+    This executes the scripts/insider_probe.py logic in the background.
+    """
+    import json
+    from pathlib import Path
+
+    result_file = Path("/home/user/Documents/polymarketbot/data/insider_probe_results.json")
+    scan_id = f"insider_probe_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    def _count_flagged(data: dict) -> int:
+        """Count total flagged accounts from probe results."""
+        total = 0
+        for priority in ['critical', 'high', 'medium', 'low']:
+            total += len(data.get('priority_distribution', {}).get(priority, []))
+        return total
+
+    # Handle cache mode
+    if request.use_cache:
+        if not result_file.exists():
+            raise HTTPException(status_code=404, detail="No cached insider probe results found. Run a new scan first.")
+
+        try:
+            with open(result_file) as f:
+                data = json.load(f)
+            accounts_found = _count_flagged(data)
+
+            _preset_scans[scan_id] = {
+                "scan_type": "insider_probe",
+                "status": "completed",
+                "progress_pct": 100,
+                "message": f"Loaded {accounts_found} flagged accounts from cache",
+                "accounts_found": accounts_found,
+                "started_at": datetime.now().isoformat(),
+                "completed_at": datetime.now().isoformat(),
+                "error": None,
+                "from_cache": True,
+                "cache_date": data.get("generated_at"),
+                "mode": data.get("mode", "unknown"),
+            }
+
+            return {"scan_id": scan_id, "message": f"Loaded {accounts_found} flagged accounts from cache", "from_cache": True}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to load cache: {str(e)}")
+
+    # Check if already running
+    if any(s["status"] == "running" and s["scan_type"] == "insider_probe" for s in _preset_scans.values()):
+        raise HTTPException(status_code=409, detail="Insider probe already running")
+
+    _preset_scans[scan_id] = {
+        "scan_type": "insider_probe",
+        "status": "running",
+        "progress_pct": 0,
+        "message": "Starting insider probe...",
+        "accounts_found": 0,
+        "started_at": datetime.now().isoformat(),
+        "completed_at": None,
+        "error": None,
+        "from_cache": False,
+    }
+
+    async def run_probe():
+        try:
+            script_path = Path("/home/user/Documents/polymarketbot/scripts/insider_probe.py")
+            if not script_path.exists():
+                _preset_scans[scan_id]["status"] = "error"
+                _preset_scans[scan_id]["error"] = "insider_probe.py not found"
+                return
+
+            _preset_scans[scan_id]["message"] = "Running insider probe (historical mode)..."
+            _preset_scans[scan_id]["progress_pct"] = 10
+
+            # Run the script with --historical flag for retroactive detection
+            process = await asyncio.create_subprocess_exec(
+                "python3", str(script_path), "--historical",
+                cwd="/home/user/Documents/polymarketbot",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                # Load results
+                if result_file.exists():
+                    with open(result_file) as f:
+                        data = json.load(f)
+                    _preset_scans[scan_id]["accounts_found"] = _count_flagged(data)
+
+                _preset_scans[scan_id]["status"] = "completed"
+                _preset_scans[scan_id]["progress_pct"] = 100
+                _preset_scans[scan_id]["message"] = f"Complete! Flagged {_preset_scans[scan_id]['accounts_found']} suspects"
+            else:
+                _preset_scans[scan_id]["status"] = "error"
+                _preset_scans[scan_id]["error"] = stderr.decode()[:500]
+                _preset_scans[scan_id]["message"] = "Probe failed"
+
+            _preset_scans[scan_id]["completed_at"] = datetime.now().isoformat()
+
+        except Exception as e:
+            _preset_scans[scan_id]["status"] = "error"
+            _preset_scans[scan_id]["error"] = str(e)
+            _preset_scans[scan_id]["completed_at"] = datetime.now().isoformat()
+
+    background_tasks.add_task(run_probe)
+
+    return {"scan_id": scan_id, "message": "Insider probe started"}
+
+
+@router.get("/preset/{scan_id}")
+async def get_preset_scan_status(scan_id: str):
+    """Get the status of a preset scan."""
+    if scan_id not in _preset_scans:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    return _preset_scans[scan_id]
+
+
+@router.get("/preset/status/all")
+async def get_all_preset_status():
+    """Get status of all preset scans."""
+    return {
+        "scans": list(_preset_scans.values()),
+        "mass_scan_running": any(
+            s["status"] == "running" and s["scan_type"] == "mass_scan"
+            for s in _preset_scans.values()
+        ),
+        "insider_probe_running": any(
+            s["status"] == "running" and s["scan_type"] == "insider_probe"
+            for s in _preset_scans.values()
+        ),
+    }
+
+
+@router.get("/preset/insider-probe/results")
+async def get_insider_probe_results(
+    priority: Optional[str] = None,
+    limit: int = Query(default=100, le=500)
+):
+    """Get the latest insider probe results.
+
+    Returns flagged accounts from the most recent probe run.
+
+    Args:
+        priority: Filter by priority (critical, high, medium, low)
+        limit: Max number of results to return
+    """
+    import json
+    from pathlib import Path
+
+    result_file = Path("/home/user/Documents/polymarketbot/data/insider_probe_results.json")
+    if not result_file.exists():
+        return {"results": [], "total": 0, "message": "No probe results found. Run an insider probe first."}
+
+    try:
+        with open(result_file) as f:
+            data = json.load(f)
+
+        # Collect accounts from all priorities
+        all_accounts = []
+        for p in ['critical', 'high', 'medium', 'low']:
+            accounts = data.get('priority_distribution', {}).get(p, [])
+            for acc in accounts:
+                acc['priority'] = p  # Ensure priority is set
+            all_accounts.extend(accounts)
+
+        # Filter by priority if specified
+        if priority:
+            all_accounts = [a for a in all_accounts if a.get('priority') == priority]
+
+        # Apply limit
+        all_accounts = all_accounts[:limit]
+
+        return {
+            "results": all_accounts,
+            "total": len(all_accounts),
+            "generated_at": data.get("generated_at"),
+            "mode": data.get("mode"),
+            "stats": data.get("stats", {}),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load results: {str(e)}")
+
+
+@router.get("/preset/mass-scan/results")
+async def get_mass_scan_results(
+    min_profit: Optional[float] = None,
+    limit: int = Query(default=100, le=500)
+):
+    """Get the latest mass scan results.
+
+    Returns profitable accounts from the most recent scan.
+
+    Args:
+        min_profit: Filter by minimum profit USD
+        limit: Max number of results to return
+    """
+    import json
+    from pathlib import Path
+
+    result_file = Path("/home/user/Documents/polymarketbot/data/analyzed_accounts.json")
+    if not result_file.exists():
+        return {"results": [], "total": 0, "message": "No scan results found. Run a mass scan first."}
+
+    try:
+        with open(result_file) as f:
+            data = json.load(f)
+
+        accounts = data.get("accounts", [])
+
+        # Filter by min profit if specified
+        if min_profit:
+            accounts = [a for a in accounts if a.get("profit_usd", 0) >= min_profit]
+
+        # Apply limit
+        accounts = accounts[:limit]
+
+        return {
+            "results": accounts,
+            "total": len(accounts),
+            "generated_at": data.get("generated_at"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load results: {str(e)}")
 
 
 # =============================================================================
@@ -1234,14 +2032,15 @@ async def fetch_more_trades(request: FetchMoreTradesRequest):
     if account_data is None:
         raise HTTPException(status_code=404, detail="Account not found in analyzed data")
 
-    # Fetch more trades
+    # Fetch more trades AND redemptions
     try:
         async with DataAPIClient() as client:
             all_activities = []
+            all_redeems = []
             offset = 0
             batch_size = 500
 
-            # Paginate to get all trades up to limit
+            # Paginate to get all TRADES up to limit
             while offset < limit:
                 activities = await client.get_activity(
                     user=wallet,
@@ -1256,6 +2055,26 @@ async def fetch_more_trades(request: FetchMoreTradesRequest):
                 all_activities.extend(activities)
 
                 if len(activities) < batch_size:
+                    break
+
+                offset += batch_size
+
+            # Also fetch REDEEM activities (resolved positions)
+            offset = 0
+            while offset < limit // 2:  # Fewer pages for redeems
+                redeems = await client.get_activity(
+                    user=wallet,
+                    activity_type=ActivityType.REDEEM,
+                    limit=batch_size,
+                    offset=offset,
+                )
+
+                if not redeems:
+                    break
+
+                all_redeems.extend(redeems)
+
+                if len(redeems) < batch_size:
                     break
 
                 offset += batch_size
@@ -1291,17 +2110,27 @@ async def fetch_more_trades(request: FetchMoreTradesRequest):
             else:
                 position_consistency = 0
 
-            # Activity metrics
+            # Activity metrics (include both trades AND redeems for timestamps)
             now = datetime.now()
             dates = set()
             timestamps_dt = []
+
+            # Trade timestamps
             for a in all_activities:
                 try:
                     dates.add(a.timestamp.strftime("%Y-%m-%d"))
                     timestamps_dt.append(a.timestamp)
                 except:
                     pass
-            active_days = len(dates)
+
+            # Also include redeem timestamps for activity recency
+            for r in all_redeems:
+                try:
+                    timestamps_dt.append(r.timestamp)
+                except:
+                    pass
+
+            active_days = len(dates)  # Active TRADING days only
 
             last_trade_timestamp = None
             if len(timestamps_dt) >= 2:
@@ -1319,11 +2148,11 @@ async def fetch_more_trades(request: FetchMoreTradesRequest):
 
             trades_per_week = (num_trades / max(1, account_age_days)) * 7
 
-            # Unique markets
+            # Unique markets (from trades only - redeems have incomplete market data)
             markets = set(a.condition_id for a in all_activities if a.condition_id)
             unique_markets = len(markets)
 
-            # Buy/sell ratio
+            # Buy/sell ratio (from trades only)
             buys = sum(1 for a in all_activities if a.side and a.side.value == "BUY")
             buy_sell_ratio = buys / num_trades if num_trades > 0 else 0.5
 
@@ -1331,7 +2160,7 @@ async def fetch_more_trades(request: FetchMoreTradesRequest):
             pnl_per_trade = pnl / num_trades if num_trades > 0 else 0
             pnl_per_market = pnl / unique_markets if unique_markets > 0 else 0
 
-            # Recent activity
+            # Recent activity (trades)
             trades_last_7d = 0
             trades_last_30d = 0
             for a in all_activities:
@@ -1345,10 +2174,21 @@ async def fetch_more_trades(request: FetchMoreTradesRequest):
                 except:
                     pass
 
-            is_currently_active = trades_last_7d > 0
+            # Count recent redeems for activity status
+            redeems_last_7d = 0
+            for r in all_redeems:
+                try:
+                    days_ago = (now - r.timestamp).days
+                    if days_ago <= 7:
+                        redeems_last_7d += 1
+                except:
+                    pass
 
-            # Calculate drawdowns with full data
-            drawdown_metrics = calculate_drawdown_metrics(all_activities, pnl)
+            # Account is active if they traded OR redeemed in last 7 days
+            is_currently_active = (trades_last_7d > 0) or (redeems_last_7d > 0)
+
+            # Calculate drawdowns with full data including redemptions
+            drawdown_metrics = calculate_drawdown_metrics(all_activities, pnl, all_redeems)
 
             # Win rate estimate - more varied based on actual performance metrics
             total_volume = sum(sizes)
@@ -1664,3 +2504,105 @@ async def get_scan_presets():
             },
         ]
     }
+
+
+# =============================================================================
+# Lazy Categorization Endpoint
+# =============================================================================
+
+class CategorizeRequest(BaseModel):
+    """Request to categorize accounts lazily."""
+    wallet_addresses: List[str] = Field(..., min_length=1, max_length=50)
+    sample_trades: int = Field(50, ge=10, le=200)
+
+
+@router.post("/categorize")
+async def categorize_accounts(request: CategorizeRequest):
+    """Lazily categorize accounts by sampling their recent trades.
+
+    This is a lightweight categorization that:
+    1. Fetches a sample of recent trades (default 50)
+    2. Looks up market titles for those trades
+    3. Categorizes based on keywords
+    4. Returns category breakdown for each account
+
+    Use this after scanning to categorize accounts without
+    slowing down the main scan process.
+    """
+    try:
+        service = await get_discovery_service()
+        analyzer = service._analyzer
+
+        results = {}
+
+        for wallet in request.wallet_addresses:
+            try:
+                # Fetch sample of recent trades
+                activities = await analyzer._data_client.get_activity(
+                    user=wallet.lower(),
+                    activity_type=analyzer._data_client.ActivityType.TRADE if hasattr(analyzer._data_client, 'ActivityType') else "trade",
+                    limit=request.sample_trades,
+                )
+
+                if not activities:
+                    results[wallet] = {
+                        "primary_category": "Unknown",
+                        "category_breakdown": {},
+                        "trades_sampled": 0,
+                    }
+                    continue
+
+                # Categorize each trade
+                from collections import defaultdict
+                category_counts = defaultdict(int)
+
+                for activity in activities:
+                    try:
+                        # Get market title - use cache or fetch
+                        condition_id = activity.condition_id
+                        market_title = await analyzer._get_market_title(condition_id)
+                        category = analyzer._categorize_market(market_title)
+                        category_counts[category] += 1
+                    except Exception:
+                        category_counts["other"] += 1
+
+                # Calculate breakdown percentages
+                total = sum(category_counts.values())
+                breakdown = {
+                    cat: round(count / total * 100, 1)
+                    for cat, count in category_counts.items()
+                }
+
+                # Find primary category
+                primary = max(category_counts.items(), key=lambda x: x[1])[0] if category_counts else "other"
+                concentration = breakdown.get(primary, 0)
+
+                # If no single category dominates (>60%), mark as Diversified
+                if concentration < 60:
+                    primary = "Diversified"
+
+                results[wallet] = {
+                    "primary_category": primary.title() if primary != "Diversified" else "Diversified",
+                    "category_concentration": concentration,
+                    "category_breakdown": breakdown,
+                    "trades_sampled": len(activities),
+                }
+
+            except Exception as e:
+                logger.warning("categorize_failed", wallet=wallet[:10], error=str(e))
+                results[wallet] = {
+                    "primary_category": "Unknown",
+                    "category_breakdown": {},
+                    "trades_sampled": 0,
+                    "error": str(e),
+                }
+
+        return {
+            "categorized": len([r for r in results.values() if r.get("trades_sampled", 0) > 0]),
+            "failed": len([r for r in results.values() if r.get("trades_sampled", 0) == 0]),
+            "results": results,
+        }
+
+    except Exception as e:
+        logger.error("categorize_batch_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))

@@ -107,6 +107,8 @@ class Activity:
     usd_value: Decimal
     tx_hash: Optional[str] = None
     user: Optional[str] = None
+    event_slug: Optional[str] = None
+    market_title: Optional[str] = None
 
     @classmethod
     def from_api(cls, data: dict) -> "Activity":
@@ -131,7 +133,7 @@ class Activity:
             type=activity_type,
             timestamp=timestamp,
             condition_id=data.get("conditionId", data.get("condition_id", "")),
-            token_id=data.get("assetId", data.get("asset_id", data.get("tokenId", ""))),
+            token_id=data.get("asset", data.get("assetId", data.get("asset_id", data.get("tokenId", "")))),
             outcome=data.get("outcome", ""),
             side=side,
             size=Decimal(str(data.get("size", data.get("amount", 0)))),
@@ -139,6 +141,8 @@ class Activity:
             usd_value=Decimal(str(data.get("usdcSize", data.get("value", data.get("usdValue", 0))))),
             tx_hash=data.get("transactionHash", data.get("tx_hash")),
             user=data.get("proxyWallet", data.get("user")),
+            event_slug=data.get("eventSlug", data.get("event_slug")),
+            market_title=data.get("title", data.get("market_title")),
         )
 
 

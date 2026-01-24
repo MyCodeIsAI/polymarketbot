@@ -52,6 +52,62 @@ CATEGORY_KEYWORDS = {
 MAINSTREAM_CATEGORIES = {"politics", "sports"}
 NICHE_CATEGORIES = {"weather", "economics", "tech", "finance"}
 
+# Primary category classification for traders
+# Threshold: ≥60% of trades in a category to be classified as that type
+PRIMARY_CATEGORY_THRESHOLD = 0.60
+SPECIALIST_THRESHOLD = 0.80  # ≥80% = true specialist
+
+# Simplified trader categories (maps raw categories to display categories)
+TRADER_CATEGORIES = {
+    "crypto": "Crypto",
+    "politics": "Politics",
+    "sports": "Sports",
+    "finance": "Finance",  # Includes economics
+    "economics": "Finance",  # Map to Finance
+    "weather": "Weather",
+    "tech": "Tech",
+    "culture": "Culture",
+}
+DIVERSIFIED_CATEGORY = "Diversified"
+
+
+def classify_trader_category(category_breakdown: dict[str, float]) -> tuple[str, float]:
+    """Classify a trader into their primary category based on trade distribution.
+
+    Args:
+        category_breakdown: Dict of category -> percentage (0.0 to 1.0)
+
+    Returns:
+        Tuple of (primary_category, concentration_pct)
+        primary_category is one of: Crypto, Politics, Sports, Finance, Weather, Tech, Culture, Diversified
+    """
+    if not category_breakdown:
+        return DIVERSIFIED_CATEGORY, 0.0
+
+    # Combine economics into finance for classification
+    combined = {}
+    for cat, pct in category_breakdown.items():
+        cat_lower = cat.lower()
+        if cat_lower == "economics":
+            combined["finance"] = combined.get("finance", 0.0) + pct
+        else:
+            combined[cat_lower] = combined.get(cat_lower, 0.0) + pct
+
+    if not combined:
+        return DIVERSIFIED_CATEGORY, 0.0
+
+    # Find the dominant category
+    top_category = max(combined, key=combined.get)
+    top_pct = combined[top_category]
+
+    # If below threshold, they're diversified
+    if top_pct < PRIMARY_CATEGORY_THRESHOLD:
+        return DIVERSIFIED_CATEGORY, top_pct
+
+    # Map to display name
+    display_name = TRADER_CATEGORIES.get(top_category, top_category.title())
+    return display_name, top_pct
+
 
 # =============================================================================
 # Data Classes for Each Phase
@@ -151,6 +207,9 @@ class DeepAnalysisResult:
     # Category-specific metrics
     category_win_rates: dict[str, float] = field(default_factory=dict)
 
+    # Authoritative P/L from leaderboard (set by service, not computed)
+    total_pnl: Optional[Decimal] = None
+
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -162,6 +221,8 @@ class DeepAnalysisResult:
             "score_breakdown": self.scoring_result.to_dict() if self.scoring_result else {},
             "red_flags": self.scoring_result.red_flags if self.scoring_result else [],
             "red_flag_count": self.scoring_result.red_flag_count if self.scoring_result else 0,
+            # Authoritative P/L from leaderboard (more accurate than computed pl_metrics)
+            "total_pnl": float(self.total_pnl) if self.total_pnl else None,
             "pl_metrics": self._metrics_to_dict(self.pl_metrics),
             "pattern_metrics": self._metrics_to_dict(self.pattern_metrics),
             "insider_signals": self._metrics_to_dict(self.insider_signals),
@@ -462,11 +523,25 @@ class AccountAnalyzer:
             self._stats["api_calls"] += 1
 
             if not activities:
-                return LightScanResult(
-                    wallet_address=wallet,
-                    passed=False,
-                    rejection_reason=f"No trades in last {recent_days} days",
-                )
+                # Wide net mode: don't reject just because no recent trades
+                # Profitable accounts may not trade frequently
+                if self.mode == DiscoveryMode.WIDE_NET_PROFITABILITY:
+                    # Pass them through to Phase 3 which will do full analysis
+                    self._stats["phase2_passed"] += 1
+                    return LightScanResult(
+                        wallet_address=wallet,
+                        passed=True,  # Let Phase 3 evaluate with full history
+                        rejection_reason=None,
+                        recent_trade_count=0,
+                        is_active=False,
+                        light_score=40,  # Neutral-ish score
+                    )
+                else:
+                    return LightScanResult(
+                        wallet_address=wallet,
+                        passed=False,
+                        rejection_reason=f"No trades in last {recent_days} days",
+                    )
 
             # Quick metrics
             recent_count = len(activities)
@@ -482,14 +557,19 @@ class AccountAnalyzer:
             pct_long_odds = len([p for p in prices if p < 0.20]) / len(prices) if prices else 0.0
 
             # Category analysis (quick - just from recent activity)
-            category_counts = defaultdict(int)
-            for activity in activities:
-                cat = await self._quick_categorize(activity.condition_id)
-                category_counts[cat] += 1
+            # Skip for wide_net mode - we don't need categories and it's expensive
+            if self.mode == DiscoveryMode.WIDE_NET_PROFITABILITY:
+                mainstream_pct = 0.5  # Neutral
+                niche_pct = 0.5
+            else:
+                category_counts = defaultdict(int)
+                for activity in activities:
+                    cat = await self._quick_categorize(activity.condition_id)
+                    category_counts[cat] += 1
 
-            total_cats = sum(category_counts.values())
-            mainstream_pct = sum(category_counts.get(c, 0) for c in MAINSTREAM_CATEGORIES) / max(1, total_cats)
-            niche_pct = sum(category_counts.get(c, 0) for c in NICHE_CATEGORIES) / max(1, total_cats)
+                total_cats = sum(category_counts.values())
+                mainstream_pct = sum(category_counts.get(c, 0) for c in MAINSTREAM_CATEGORIES) / max(1, total_cats)
+                niche_pct = sum(category_counts.get(c, 0) for c in NICHE_CATEGORIES) / max(1, total_cats)
 
             # Estimate account age (would need historical data for precise)
             account_age = recent_days if recent_count >= min_recent_trades else 0
@@ -538,7 +618,14 @@ class AccountAnalyzer:
                     score += 15  # Fresh activity
 
             # Hard filter: activity check
-            is_active = days_since_last < 14 and recent_count >= min_recent_trades
+            # Wide net mode: VERY relaxed - we want profitable accounts regardless of recent activity
+            if self.mode == DiscoveryMode.WIDE_NET_PROFITABILITY:
+                # For wide net, pass accounts through to Phase 3 which will do full analysis
+                # Many profitable traders made money historically and may not be active now
+                # Only reject if there's NO activity at all (already handled at line 526)
+                is_active = True  # Let Phase 3 evaluate with full history
+            else:
+                is_active = days_since_last < 14 and recent_count >= min_recent_trades
 
             # Mode-specific hard filters
             config = self.scoring_engine.config
@@ -638,15 +725,17 @@ class AccountAnalyzer:
         wallet_address: str,
         lookback_days: int = 90,
         include_insider_signals: bool = True,
+        max_trades: int = 500,
     ) -> DeepAnalysisResult:
         """Phase 3: Full deep analysis of an account.
 
-        Fetches complete trade history and computes all metrics.
+        Fetches trade history and computes all metrics.
 
         Args:
             wallet_address: Wallet to analyze
             lookback_days: Days of history
             include_insider_signals: Whether to compute insider signals
+            max_trades: Maximum trades to fetch per account
 
         Returns:
             DeepAnalysisResult with complete metrics and scoring
@@ -655,8 +744,8 @@ class AccountAnalyzer:
         wallet = wallet_address.lower()
 
         try:
-            # Fetch full trade history (1-2 API calls depending on pagination)
-            trades = await self._fetch_trade_history(wallet, lookback_days)
+            # Fetch trade history (limited to max_trades)
+            trades = await self._fetch_trade_history(wallet, lookback_days, max_trades)
 
             if not trades:
                 return DeepAnalysisResult(
@@ -684,6 +773,14 @@ class AccountAnalyzer:
                 insider_signals = self._compute_insider_signals(trades, positions)
 
             # Run through scoring engine
+            # DEBUG: Log scoring config for first wallet analyzed
+            if self._stats["phase3_processed"] <= 1:
+                sc = self.scoring_engine.config
+                logger.info("deep_analysis_debug_scoring_config",
+                            wallet=wallet[:10],
+                            min_composite_score=sc.min_composite_score,
+                            total_trades=pattern_metrics.total_trades if pattern_metrics else 0)
+
             scoring_result = self.scoring_engine.score_account(
                 pl_metrics=pl_metrics,
                 pattern_metrics=pattern_metrics,
@@ -705,7 +802,7 @@ class AccountAnalyzer:
                 pattern_metrics=pattern_metrics,
                 insider_signals=insider_signals,
                 scoring_result=scoring_result,
-                trades=trades,
+                trades=[],  # Don't store trades to save memory - use recent_sample instead
                 positions=[p.__dict__ if hasattr(p, '__dict__') else p for p in positions],
                 pl_curve_data=pl_curve_data,
                 market_categories=market_categories,
@@ -729,6 +826,7 @@ class AccountAnalyzer:
         lookback_days: int = 90,
         max_concurrent: int = 3,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        max_trades: int = 500,
     ) -> list[DeepAnalysisResult]:
         """Batch deep analysis with limited concurrency.
 
@@ -737,6 +835,7 @@ class AccountAnalyzer:
             lookback_days: Days of history
             max_concurrent: Max concurrent analyses
             progress_callback: Callback(completed, total, current_wallet)
+            max_trades: Maximum trades to fetch per account
 
         Returns:
             List of DeepAnalysisResult
@@ -746,6 +845,17 @@ class AccountAnalyzer:
         completed = 0
         total = len(wallets)
 
+        # DEBUG: Log scoring config at start of batch
+        sc = self.scoring_engine.config
+        logger.info("batch_debug_config",
+                    min_composite_score=sc.min_composite_score,
+                    min_trades_threshold=sc.hard_filters.get('min_trades', {}).threshold if hasattr(sc.hard_filters.get('min_trades', {}), 'threshold') else 'N/A')
+
+        # DEBUG: Track pass/fail counts
+        debug_pass_count = [0]
+        debug_fail_count = [0]
+        debug_no_score_count = [0]
+
         async def analyze_one(wallet: str):
             nonlocal completed
             async with semaphore:
@@ -754,11 +864,38 @@ class AccountAnalyzer:
                         await progress_callback(completed, total, wallet[:10])
                     else:
                         progress_callback(completed, total, wallet[:10])
-                result = await self.deep_analysis(wallet, lookback_days)
+                result = await self.deep_analysis(wallet, lookback_days, max_trades=max_trades)
                 completed += 1
+
+                # DEBUG: Track scoring results
+                if result.scoring_result:
+                    if result.scoring_result.passes_threshold:
+                        debug_pass_count[0] += 1
+                    else:
+                        debug_fail_count[0] += 1
+                        # Log first few failures
+                        if debug_fail_count[0] <= 3:
+                            logger.warning("batch_debug_fail",
+                                           wallet=wallet[:10],
+                                           composite=result.scoring_result.composite_score,
+                                           hard_passed=result.scoring_result.hard_filter_passed,
+                                           failures=result.scoring_result.hard_filter_failures)
+                else:
+                    debug_no_score_count[0] += 1
+                    if debug_no_score_count[0] <= 3:
+                        logger.warning("batch_debug_no_score",
+                                       wallet=wallet[:10],
+                                       error=result.error)
+
                 return result
 
         results = await asyncio.gather(*[analyze_one(w) for w in wallets])
+
+        # DEBUG: Log final counts
+        logger.info("batch_debug_final",
+                    passed=debug_pass_count[0],
+                    failed=debug_fail_count[0],
+                    no_score=debug_no_score_count[0])
 
         # Sort by composite score
         results.sort(
@@ -931,33 +1068,113 @@ class AccountAnalyzer:
         self,
         wallet: str,
         lookback_days: int,
+        max_trades: int = 500,
     ) -> list[TradeRecord]:
-        """Fetch and enrich trade history."""
+        """Fetch and enrich trade history with pagination.
+
+        CRITICAL: Fetches ALL activity types (TRADE, REDEEM, MERGE) to ensure
+        accurate P/L calculation:
+        - TRADE: Buy/sell transactions
+        - REDEEM: Winning positions that paid out $1/share at resolution
+        - MERGE: YES+NO pairs combined for $1/share
+
+        Missing REDEEM trades causes massive P/L underreporting since many
+        profitable traders hold positions to resolution rather than selling.
+
+        Args:
+            wallet: Wallet address
+            lookback_days: Days of history to fetch
+            max_trades: Maximum trades to fetch (default 500)
+        """
         since_timestamp = int((datetime.utcnow() - timedelta(days=lookback_days)).timestamp())
 
-        activities = await self._data_client.get_activity(
-            user=wallet,
-            activity_type=ActivityType.TRADE,
-            start_timestamp=since_timestamp,
-            limit=5000,
-        )
-        self._stats["api_calls"] += 1
+        # Paginate up to max_trades limit
+        # NOTE: No activity_type filter - we need TRADE, REDEEM, and MERGE for accurate P/L
+        all_activities = []
+        offset = 0
+        page_size = min(1000, max_trades)
+        max_pages = (max_trades // page_size) + 1
+
+        for _ in range(max_pages):
+            if len(all_activities) >= max_trades:
+                break
+            activities = await self._data_client.get_activity(
+                user=wallet,
+                activity_type=None,  # Fetch ALL types - critical for accurate P/L!
+                start_timestamp=since_timestamp,
+                limit=page_size,
+                offset=offset,
+            )
+            self._stats["api_calls"] += 1
+
+            if not activities:
+                break  # No more results
+
+            all_activities.extend(activities)
+
+            if len(all_activities) >= max_trades:
+                all_activities = all_activities[:max_trades]
+                break  # Hit max_trades limit
+
+            if len(activities) < page_size:
+                break  # Last page (partial)
+
+            offset += page_size
 
         trades = []
-        for activity in activities:
-            market_title = await self._get_market_title(activity.condition_id)
-            category = self._categorize_market(market_title)
+
+        # Wide net mode: skip expensive market categorization - we don't use it
+        skip_categorization = self.mode == DiscoveryMode.WIDE_NET_PROFITABILITY
+
+        for activity in all_activities:
+            # Only process activities that affect positions/P&L
+            # TRADE = buy/sell, REDEEM = resolution payout, MERGE = combine YES+NO
+            if activity.type not in [ActivityType.TRADE, ActivityType.REDEEM, ActivityType.MERGE]:
+                continue
+
+            if skip_categorization:
+                # Skip API calls - just use placeholder data
+                market_title = f"Market {activity.condition_id[:8]}..."
+                category = "other"
+            else:
+                market_title = await self._get_market_title(activity.condition_id)
+                category = self._categorize_market(market_title)
+
+            # Determine side and price based on activity type
+            if activity.type == ActivityType.REDEEM:
+                # REDEEM = winning position paid out at $1/share
+                side = TradeSide.SELL  # Treat as exit
+                price = Decimal("1.0")  # Resolution payout is always $1
+                usd_value = activity.size  # Size * $1
+                is_resolved = True
+                resolution_outcome = True  # This side won
+            elif activity.type == ActivityType.MERGE:
+                # MERGE = combining YES+NO for $1/share
+                side = TradeSide.SELL  # Treat as exit
+                price = Decimal("1.0")  # Merge payout is $1
+                usd_value = activity.size  # Size * $1
+                is_resolved = False  # Not a resolution, just a merge
+                resolution_outcome = None
+            else:
+                # Regular TRADE
+                side = activity.side or TradeSide.BUY
+                price = activity.price
+                usd_value = activity.usd_value
+                is_resolved = False
+                resolution_outcome = None
 
             trades.append(TradeRecord(
                 timestamp=activity.timestamp,
                 market_id=activity.condition_id,
                 market_title=market_title,
                 token_id=activity.token_id,
-                side=activity.side or TradeSide.BUY,
+                side=side,
                 size=activity.size,
-                price=activity.price,
-                usd_value=activity.usd_value,
+                price=price,
+                usd_value=usd_value,
                 category=category,
+                is_resolved=is_resolved,
+                resolution_outcome=resolution_outcome,
             ))
 
         trades.sort(key=lambda t: t.timestamp)
@@ -1062,6 +1279,8 @@ class AccountAnalyzer:
                 peak = pnl_dec
             elif peak > 0:
                 dd = (peak - pnl_dec) / peak
+                # Cap drawdown at 100% - can't lose more than 100% from peak
+                dd = min(dd, Decimal("1.0"))
                 if dd > max_drawdown:
                     max_drawdown = dd
                 drawdowns.append(float(dd))
@@ -1079,10 +1298,81 @@ class AccountAnalyzer:
         avg_loss = total_losses / len(losses) if losses else Decimal("0")
         profit_factor = float(total_wins / total_losses) if total_losses > 0 else float("inf")
 
-        # Concentration
+        # Concentration (extended for copytrade viability analysis)
         sorted_wins = sorted(wins, reverse=True)
         largest_win_pct = float(sorted_wins[0] / cumulative_pnl) if sorted_wins and cumulative_pnl > 0 else 0.0
         top_3_pct = float(sum(sorted_wins[:3]) / cumulative_pnl) if len(sorted_wins) >= 3 and cumulative_pnl > 0 else largest_win_pct
+        top_5_pct = float(sum(sorted_wins[:5]) / cumulative_pnl) if len(sorted_wins) >= 5 and cumulative_pnl > 0 else top_3_pct
+        top_10_pct = float(sum(sorted_wins[:10]) / cumulative_pnl) if len(sorted_wins) >= 10 and cumulative_pnl > 0 else top_5_pct
+
+        # Market-level P/L analysis for copytrade viability
+        # Track P/L per market to compute market win rate
+        market_pnl: dict[str, Decimal] = defaultdict(Decimal)
+        redemption_profit = Decimal("0")
+        sell_profit = Decimal("0")
+        redemption_wins = 0
+        sell_wins = 0
+
+        # Recompute per-market P/L
+        market_positions: dict[str, dict] = {}
+        for trade in trades:
+            market_id = trade.market_id
+            if trade.side == TradeSide.BUY:
+                if market_id not in market_positions:
+                    market_positions[market_id] = {"size": Decimal("0"), "cost": Decimal("0")}
+                market_positions[market_id]["size"] += trade.size
+                market_positions[market_id]["cost"] += trade.usd_value
+            else:  # SELL (includes REDEEM and MERGE)
+                if market_id in market_positions:
+                    pos = market_positions[market_id]
+                    if pos["size"] > 0:
+                        avg_cost = pos["cost"] / pos["size"]
+                        realized = trade.usd_value - (avg_cost * min(trade.size, pos["size"]))
+                        market_pnl[market_id] += realized
+                        # Track if this was a redemption (resolution) vs regular sell
+                        if trade.is_resolved:
+                            if realized > 0:
+                                redemption_profit += realized
+                                redemption_wins += 1
+                        else:
+                            if realized > 0:
+                                sell_profit += realized
+                                sell_wins += 1
+                        pos["size"] -= trade.size
+                        if pos["size"] <= 0:
+                            del market_positions[market_id]
+
+        # Calculate market-level win rate
+        markets_profitable = sum(1 for pnl in market_pnl.values() if pnl > 0)
+        markets_unprofitable = sum(1 for pnl in market_pnl.values() if pnl < 0)
+        market_win_rate = markets_profitable / (markets_profitable + markets_unprofitable) if (markets_profitable + markets_unprofitable) > 0 else 0.0
+
+        # Redemption percentage of profit
+        redemption_pct = float(redemption_profit / total_wins) if total_wins > 0 else 0.0
+
+        # Simulated capture rate analysis
+        # This estimates what % of profit you'd get if you randomly captured X% of trades
+        import random
+        market_pnl_list = list(market_pnl.values())
+        sim_50_results = []
+        sim_25_results = []
+
+        if len(market_pnl_list) >= 4:
+            for _ in range(100):  # 100 simulations
+                # 50% capture
+                captured_50 = random.sample(market_pnl_list, len(market_pnl_list) // 2)
+                sim_50_results.append(float(sum(captured_50)))
+                # 25% capture
+                captured_25 = random.sample(market_pnl_list, len(market_pnl_list) // 4)
+                sim_25_results.append(float(sum(captured_25)))
+
+            sim_50_results.sort()
+            sim_25_results.sort()
+            sim_50_median = sim_50_results[len(sim_50_results) // 2]
+            sim_25_median = sim_25_results[len(sim_25_results) // 2]
+        else:
+            sim_50_median = float(cumulative_pnl) * 0.5
+            sim_25_median = float(cumulative_pnl) * 0.25
 
         return PLCurveMetrics(
             total_realized_pnl=cumulative_pnl,
@@ -1102,6 +1392,22 @@ class AccountAnalyzer:
             largest_win_pct_of_total=largest_win_pct,
             top_3_wins_pct_of_total=top_3_pct,
             avg_recovery_time_days=0.0,
+            # Win/loss counts and totals
+            win_count=len(wins),
+            loss_count=len(losses),
+            gross_profit=total_wins,
+            gross_loss=total_losses,
+            # Copytrade viability metrics
+            top_5_wins_pct_of_total=top_5_pct,
+            top_10_wins_pct_of_total=top_10_pct,
+            market_win_rate=market_win_rate,
+            markets_profitable=markets_profitable,
+            markets_unprofitable=markets_unprofitable,
+            redemption_win_count=redemption_wins,
+            sell_win_count=sell_wins,
+            redemption_pct_of_profit=redemption_pct,
+            simulated_50pct_capture_median=sim_50_median,
+            simulated_25pct_capture_median=sim_25_median,
         )
 
     def _compute_pattern_metrics(self, trades: list[TradeRecord]) -> TradingPatternMetrics:
@@ -1145,6 +1451,16 @@ class AccountAnalyzer:
         niche_count = sum(count for cat, count in category_counts.items() if cat in NICHE_CATEGORIES)
         niche_pct = niche_count / total_trades if total_trades > 0 else 0.0
 
+        # Days since last trade (activity recency)
+        days_since_last = (datetime.utcnow() - last_trade).days
+
+        # Buy/sell ratio
+        buy_count = sum(1 for t in trades if t.side == TradeSide.BUY)
+        buy_ratio = buy_count / total_trades if total_trades > 0 else 0.5
+
+        # Primary category classification
+        primary_cat, cat_concentration = classify_trader_category(category_breakdown)
+
         return TradingPatternMetrics(
             avg_position_size_usd=avg_size,
             median_position_size_usd=median_size,
@@ -1166,6 +1482,10 @@ class AccountAnalyzer:
             niche_market_pct=niche_pct,
             avg_hold_time_hours=0.0,
             pct_trades_near_expiry=0.0,
+            days_since_last_trade=days_since_last,
+            buy_sell_ratio=buy_ratio,
+            primary_category=primary_cat,
+            category_concentration=cat_concentration,
         )
 
     def _compute_category_win_rates(self, trades: list[TradeRecord]) -> dict[str, float]:
@@ -1346,6 +1666,10 @@ class AccountAnalyzer:
             largest_win_pct_of_total=0.0,
             top_3_wins_pct_of_total=0.0,
             avg_recovery_time_days=0.0,
+            win_count=0,
+            loss_count=0,
+            gross_profit=Decimal("0"),
+            gross_loss=Decimal("0"),
         )
 
     def _empty_pattern_metrics(self) -> TradingPatternMetrics:
@@ -1371,6 +1695,10 @@ class AccountAnalyzer:
             niche_market_pct=0.0,
             avg_hold_time_hours=0.0,
             pct_trades_near_expiry=0.0,
+            days_since_last_trade=999,
+            buy_sell_ratio=0.5,
+            primary_category="Diversified",
+            category_concentration=0.0,
         )
 
     def _empty_insider_signals(self) -> InsiderSignals:

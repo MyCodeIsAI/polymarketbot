@@ -91,6 +91,9 @@ class ScanConfig:
 
     # Filtering - RELAXED
     min_trades: int = 5  # Minimal - let scoring sort
+    max_trades: int = None  # Max trades - filter out high-frequency bots
+    min_profit: float = None  # Min profit USD - filter out small accounts
+    max_profit: float = None  # Max profit USD - filter out whales
     max_avg_position_size: float = 50000.0  # Very relaxed
     exclude_wallets: list[str] = None
 
@@ -129,6 +132,9 @@ class ScanConfig:
             "max_candidates": self.max_candidates,
             "analyze_top_n": self.analyze_top_n,
             "min_trades": self.min_trades,
+            "max_trades": self.max_trades,
+            "min_profit": self.min_profit,
+            "max_profit": self.max_profit,
             "max_avg_position_size": self.max_avg_position_size,
             "max_phase2": self.max_phase2,
             "max_phase3": self.max_phase3,
@@ -548,21 +554,73 @@ class DiscoveryService:
         processed_wallets: list[str],
         progress_pct: int,
     ) -> None:
-        """Save checkpoint for resume capability."""
-        if not self._db_session or not self._current_scan_record:
-            return
-
-        self._current_scan_record.checkpoint_data = {
+        """Save checkpoint for resume capability (both DB and file)."""
+        checkpoint_data = {
             "phase": phase,
-            "processed_wallets": processed_wallets[-100:],  # Keep last 100 for reference
+            "processed_wallets": processed_wallets,  # Keep ALL for resume
             "processed_count": len(processed_wallets),
+            "progress_pct": progress_pct,
             "timestamp": datetime.utcnow().isoformat(),
+            "scan_config": self._current_scan.config if self._current_scan else {},
         }
-        self._current_scan_record.progress_pct = progress_pct
-        self._current_scan_record.current_phase = phase
-        self._current_scan_record.last_checkpoint_at = datetime.utcnow()
 
-        await self._db_session.commit()
+        # Save to file for crash recovery
+        self._save_checkpoint_to_file(checkpoint_data)
+
+        # Also save to DB if available
+        if self._db_session and self._current_scan_record:
+            self._current_scan_record.checkpoint_data = {
+                "phase": phase,
+                "processed_wallets": processed_wallets[-100:],  # DB gets truncated list
+                "processed_count": len(processed_wallets),
+                "timestamp": checkpoint_data["timestamp"],
+            }
+            self._current_scan_record.progress_pct = progress_pct
+            self._current_scan_record.current_phase = phase
+            self._current_scan_record.last_checkpoint_at = datetime.utcnow()
+            await self._db_session.commit()
+
+    def _save_checkpoint_to_file(self, checkpoint_data: dict) -> None:
+        """Save checkpoint to JSON file for crash recovery."""
+        from pathlib import Path
+        checkpoint_file = Path("/home/user/Documents/polymarketbot/data/scan_checkpoint.json")
+        checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with open(checkpoint_file, "w") as f:
+                json.dump(checkpoint_data, f, indent=2)
+            logger.debug("checkpoint_saved_to_file", phase=checkpoint_data["phase"],
+                        processed=checkpoint_data["processed_count"])
+        except Exception as e:
+            logger.error("checkpoint_file_save_failed", error=str(e))
+
+    @staticmethod
+    def load_checkpoint_from_file() -> Optional[dict]:
+        """Load checkpoint from file for resume."""
+        from pathlib import Path
+        checkpoint_file = Path("/home/user/Documents/polymarketbot/data/scan_checkpoint.json")
+
+        if not checkpoint_file.exists():
+            return None
+
+        try:
+            with open(checkpoint_file) as f:
+                data = json.load(f)
+            logger.info("checkpoint_loaded", phase=data.get("phase"),
+                       processed=data.get("processed_count", 0))
+            return data
+        except Exception as e:
+            logger.error("checkpoint_load_failed", error=str(e))
+            return None
+
+    @staticmethod
+    def clear_checkpoint_file() -> None:
+        """Clear the checkpoint file after successful completion."""
+        from pathlib import Path
+        checkpoint_file = Path("/home/user/Documents/polymarketbot/data/scan_checkpoint.json")
+        if checkpoint_file.exists():
+            checkpoint_file.unlink()
+            logger.info("checkpoint_file_cleared")
 
     async def _commit_batch(self) -> None:
         """Commit current batch to database."""
@@ -702,10 +760,19 @@ class DiscoveryService:
         self._scan_paused = False
         self._analyzer.set_mode(config.mode)
 
-        # Update scoring thresholds from config
-        self._analyzer.scoring_engine.update_config({
+        # Update scoring thresholds from user config
+        # This ensures user's min_trades and other filters are respected
+        scoring_updates = {
             "min_composite_score": config.min_score_threshold,
-        })
+        }
+
+        # Pass user's min_trades to the hard filter in scoring engine
+        if config.min_trades:
+            scoring_updates["hard_filters"] = {
+                "min_trades": {"threshold": config.min_trades}
+            }
+
+        self._analyzer.scoring_engine.update_config(scoring_updates)
 
         scan = DiscoveryScan(
             mode=config.mode,
@@ -783,6 +850,10 @@ class DiscoveryService:
 
             phase1_passed, phase1_rejected = self._analyzer.batch_quick_filter(leaderboard_entries)
 
+            # Track leaderboard P/L for enrichment after Phase 3
+            # This is the authoritative P/L from the leaderboard (not computed)
+            leaderboard_pnl_map = {r.wallet_address.lower(): r.total_pnl for r in phase1_passed}
+
             progress.phase1_total = len(leaderboard_entries)
             progress.phase1_passed = len(phase1_passed)
 
@@ -804,6 +875,18 @@ class DiscoveryService:
                 f"Phase 1: {len(phase1_passed)}/{len(leaderboard_entries)} passed quick filter",
                 "phase1", progress_callback
             )
+
+            # Early exit if no candidates passed Phase 1
+            if len(phase1_passed) == 0:
+                logger.warning("phase1_zero_passed", total=len(leaderboard_entries))
+                await self._update_progress(
+                    progress, 100,
+                    "No candidates passed Phase 1 quick filter",
+                    "complete", progress_callback
+                )
+                scan.status = ScanStatus.COMPLETED
+                scan.completed_at = datetime.utcnow()
+                return results, scan
 
             # ================================================================
             # PHASE 2: Light Scan (1 API call per candidate)
@@ -869,6 +952,18 @@ class DiscoveryService:
                 "phase2", progress_callback
             )
 
+            # Early exit if no candidates passed Phase 2
+            if len(phase2_passed) == 0:
+                logger.warning("phase2_zero_passed", total=len(phase2_candidates))
+                await self._update_progress(
+                    progress, 100,
+                    "No candidates passed Phase 2 light scan",
+                    "complete", progress_callback
+                )
+                scan.status = ScanStatus.COMPLETED
+                scan.completed_at = datetime.utcnow()
+                return results, scan
+
             # ================================================================
             # PHASE 3: Deep Analysis (2-3 API calls per candidate)
             # ================================================================
@@ -891,11 +986,18 @@ class DiscoveryService:
                 if completed % 10 == 0 and config.persist_to_db:
                     await self._save_checkpoint("phase3", processed_wallets, pct)
 
+            # For wide_net mode, use extended lookback to capture older profitable accounts
+            # Need full history for accurate P/L and win rate metrics
+            effective_lookback = config.lookback_days
+            if config.mode == DiscoveryMode.WIDE_NET_PROFITABILITY:
+                effective_lookback = max(config.lookback_days, 1825)  # 5 years - full Polymarket history
+
             deep_results = await self._analyzer.batch_deep_analysis(
                 phase3_candidates,
-                lookback_days=config.lookback_days,
+                lookback_days=effective_lookback,
                 max_concurrent=3,
                 progress_callback=phase3_progress_cb,
+                max_trades=config.analyze_top_n,
             )
 
             # Persist deep analysis results
@@ -908,6 +1010,29 @@ class DiscoveryService:
                     self._current_scan_record.deep_analyzed_count = len(deep_results)
 
             # Filter to passing results
+            # DEBUG: Log what we're filtering
+            has_scoring = sum(1 for r in deep_results if r.scoring_result)
+            passes_threshold = sum(1 for r in deep_results if r.scoring_result and r.scoring_result.passes_threshold)
+            logger.info("phase3_filter_debug",
+                        total_results=len(deep_results),
+                        has_scoring_result=has_scoring,
+                        passes_threshold=passes_threshold)
+
+            # Log first few results for debugging
+            for i, r in enumerate(deep_results[:5]):
+                if r.scoring_result:
+                    logger.info("phase3_sample_result",
+                                idx=i,
+                                wallet=r.wallet_address[:10],
+                                score=r.scoring_result.composite_score,
+                                passes=r.scoring_result.passes_threshold,
+                                hard_passed=r.scoring_result.hard_filter_passed)
+                else:
+                    logger.info("phase3_sample_no_score",
+                                idx=i,
+                                wallet=r.wallet_address[:10],
+                                error=r.error)
+
             passed_results = [
                 r for r in deep_results
                 if r.scoring_result and r.scoring_result.passes_threshold
@@ -921,9 +1046,44 @@ class DiscoveryService:
 
             logger.info("phase3_complete", analyzed=len(deep_results), passed=len(passed_results))
 
+            # Enrich results with authoritative leaderboard P/L
+            # Use the mapping we built in Phase 1 - this is more reliable than DB lookup
+            for result in passed_results:
+                wallet_lower = result.wallet_address.lower()
+                if wallet_lower in leaderboard_pnl_map:
+                    result.total_pnl = leaderboard_pnl_map[wallet_lower]
+                elif config.persist_to_db and self._db_session:
+                    # Fallback to DB lookup if not in map
+                    try:
+                        db_account = await self._db_session.execute(
+                            select(DiscoveredAccount).where(
+                                DiscoveredAccount.wallet_address == result.wallet_address
+                            )
+                        )
+                        account = db_account.scalar_one_or_none()
+                        if account and account.total_pnl:
+                            result.total_pnl = account.total_pnl
+                    except Exception:
+                        pass  # Continue without leaderboard P/L if DB lookup fails
+
             # Convert to dict format for API response
             for result in passed_results:
                 results.append(result.to_dict())
+
+            # Apply P/L range filters from config (post-processing)
+            if config.max_profit is not None or hasattr(config, 'min_profit'):
+                min_profit = getattr(config, 'min_profit', None)
+                max_profit = config.max_profit
+                filtered_results = []
+                for r in results:
+                    pnl = float(r.get("total_pnl") or 0)
+                    if min_profit is not None and pnl < min_profit:
+                        continue
+                    if max_profit is not None and pnl > max_profit:
+                        continue
+                    filtered_results.append(r)
+                results = filtered_results
+                logger.info("profit_filter_applied", min=min_profit, max=max_profit, filtered_count=len(results))
 
             # Track errors
             for result in deep_results:
@@ -948,6 +1108,9 @@ class DiscoveryService:
                 self._current_scan_record.passed_count = len(passed_results)
                 self._current_scan_record.progress_pct = 100
                 await self._commit_batch()
+
+            # Clear checkpoint file on successful completion
+            self.clear_checkpoint_file()
 
             await self._update_progress(
                 progress, 100,
@@ -979,11 +1142,20 @@ class DiscoveryService:
         # Exclude wallets to set for quick lookup
         exclude_set = set(w.lower() for w in config.exclude_wallets)
 
+        # For small scans, don't divide by categories - fetch more from each
+        # to ensure we get enough unique accounts after deduplication
+        if config.max_candidates <= 100:
+            # Small scan: fetch max_candidates from each category, dedupe later
+            per_category_limit = config.max_candidates
+        else:
+            # Large scan: divide evenly but ensure minimum of 50 per category
+            per_category_limit = max(50, config.max_candidates // len(config.categories))
+
         for category in config.categories:
             try:
                 entries = await self._leaderboard_client.get_leaderboard_full(
                     category=category,
-                    limit=config.max_candidates // len(config.categories),
+                    limit=per_category_limit,
                 )
 
                 for entry in entries:
