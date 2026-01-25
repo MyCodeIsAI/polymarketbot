@@ -25,6 +25,7 @@ from ..api.data import DataAPIClient, Activity, ActivityType
 from ..utils.logging import get_logger
 from .scoring import InsiderScorer, ScoringResult, MarketCategory
 from .models import InsiderPriority
+from .profile import ProfileFetcher, WalletProfile
 
 logger = get_logger(__name__)
 
@@ -87,6 +88,16 @@ class TradeEvent:
             usd_value=activity.usd_value,
             tx_hash=activity.tx_hash,
         )
+
+
+@dataclass
+class MarketInfo:
+    """Cached market information for scoring."""
+    market_id: str
+    title: str
+    end_date: Optional[datetime] = None
+    category: Optional[MarketCategory] = None
+    fetched_at: Optional[datetime] = None
 
 
 @dataclass
@@ -219,6 +230,15 @@ class RealTimeMonitor:
         self._max_processed_ids = 5000  # Limit memory usage
         self._last_poll_timestamp: Optional[datetime] = None
 
+        # Enrichment caches (avoid repeated API calls)
+        self._wallet_profiles: Dict[str, WalletProfile] = {}  # wallet -> profile
+        self._market_info: Dict[str, MarketInfo] = {}  # market_id -> info
+        self._profile_fetcher: Optional[ProfileFetcher] = None
+        self._profile_cache_ttl_hours: float = 1.0  # Re-fetch profiles after 1 hour
+
+        # Sybil detector reference (set by scanner_service)
+        self.sybil_detector = None
+
         # Statistics
         self.stats = MonitorStats()
 
@@ -337,6 +357,8 @@ class RealTimeMonitor:
     async def _get_high_risk_token_ids(self) -> list[str]:
         """Get token IDs for high-risk markets (ending within 48 hours).
 
+        Also caches market info (end time, category) for scoring.
+
         Returns:
             List of token IDs to monitor
         """
@@ -373,11 +395,25 @@ class RealTimeMonitor:
 
                         # Focus on events ending in next 48 hours
                         if 0 < hours_until_end < 48:
-                            # Get token IDs from markets
+                            # Detect market category from tags/title
+                            category = self._detect_category(event)
+
+                            # Get token IDs from markets and cache info
                             markets = event.get("markets", [])
                             for market in markets:
+                                market_id = market.get("conditionId", "")
                                 clob_tokens = market.get("clobTokenIds", [])
                                 token_ids.extend(clob_tokens)
+
+                                # Cache market info for scoring
+                                if market_id:
+                                    self._market_info[market_id] = MarketInfo(
+                                        market_id=market_id,
+                                        title=market.get("question", event.get("title", "")),
+                                        end_date=end_date,
+                                        category=category,
+                                        fetched_at=now,
+                                    )
 
                     except (ValueError, TypeError):
                         continue
@@ -385,8 +421,105 @@ class RealTimeMonitor:
         except Exception as e:
             logger.debug("get_token_ids_error", error=str(e))
 
+        logger.info("market_info_cached", markets=len(self._market_info))
+
         # Limit to reasonable number
         return token_ids[:100]
+
+    def _detect_category(self, event: dict) -> Optional[MarketCategory]:
+        """Detect market category from event data.
+
+        Args:
+            event: Event data from Gamma API
+
+        Returns:
+            MarketCategory if detected, None otherwise
+        """
+        title = (event.get("title") or "").lower()
+        tags = [t.lower() for t in (event.get("tags") or [])]
+        slug = (event.get("slug") or "").lower()
+        combined = f"{title} {' '.join(tags)} {slug}"
+
+        # Check for category keywords
+        if any(kw in combined for kw in ["election", "vote", "ballot", "president", "congress", "senate"]):
+            return MarketCategory.ELECTION
+        if any(kw in combined for kw in ["war", "military", "conflict", "attack", "invasion", "troops"]):
+            return MarketCategory.MILITARY_CONFLICT
+        if any(kw in combined for kw in ["fed", "rate", "regulation", "policy", "law", "bill", "government"]):
+            return MarketCategory.POLICY_REGULATORY
+        if any(kw in combined for kw in ["earnings", "stock", "company", "ceo", "merger", "acquisition", "ipo"]):
+            return MarketCategory.CORPORATE
+        if any(kw in combined for kw in ["bitcoin", "ethereum", "crypto", "token", "defi", "nft"]):
+            return MarketCategory.CRYPTO
+        if any(kw in combined for kw in ["nfl", "nba", "mlb", "sports", "game", "match", "championship"]):
+            return MarketCategory.SPORTS
+
+        return None
+
+    async def _enrich_wallet(self, wallet_address: str) -> Optional[WalletProfile]:
+        """Enrich wallet with profile data (account age, tx count, etc).
+
+        Uses caching to avoid repeated API calls. Profile is re-fetched
+        if older than cache TTL.
+
+        Args:
+            wallet_address: Wallet to enrich
+
+        Returns:
+            WalletProfile if fetched, None on error
+        """
+        wallet_lower = wallet_address.lower()
+        now = datetime.utcnow()
+
+        # Check cache
+        if wallet_lower in self._wallet_profiles:
+            profile = self._wallet_profiles[wallet_lower]
+            age_hours = (now - profile.fetched_at).total_seconds() / 3600
+            if age_hours < self._profile_cache_ttl_hours:
+                return profile
+
+        # Initialize profile fetcher if needed
+        if self._profile_fetcher is None:
+            if self._data_client is None:
+                self._data_client = DataAPIClient()
+                await self._data_client.__aenter__()
+            self._profile_fetcher = ProfileFetcher(self._data_client)
+
+        try:
+            # Fetch profile (includes account age, tx count from activity)
+            profile = await self._profile_fetcher.fetch_profile(
+                wallet_address,
+                include_trades=False,  # We just need basic metrics
+                include_activity=True,
+                activity_limit=100,  # Enough to get first_seen
+            )
+
+            # Cache it
+            self._wallet_profiles[wallet_lower] = profile
+
+            logger.debug(
+                "wallet_enriched",
+                wallet=wallet_address[:10] + "...",
+                age_days=profile.account_age_days,
+                tx_count=profile.transaction_count,
+            )
+
+            return profile
+
+        except Exception as e:
+            logger.warning("wallet_enrichment_failed", wallet=wallet_address[:10] + "...", error=str(e))
+            return None
+
+    def _get_market_info(self, market_id: str) -> Optional[MarketInfo]:
+        """Get cached market info.
+
+        Args:
+            market_id: Market condition ID
+
+        Returns:
+            MarketInfo if cached, None otherwise
+        """
+        return self._market_info.get(market_id)
 
     def _start_polling(self) -> None:
         """Start polling fallback."""
@@ -600,7 +733,13 @@ class RealTimeMonitor:
         wallet_address: str,
         accumulation: WalletAccumulation,
     ) -> None:
-        """Evaluate a wallet for insider patterns.
+        """Evaluate a wallet for insider patterns with full enrichment.
+
+        Enriches wallet with:
+        - Account age and transaction count from Polymarket API
+        - Actual market resolution time (not accumulation time)
+        - Market category for contextual scoring
+        - Sybil detection (funding source, cluster membership)
 
         Args:
             wallet_address: Wallet to evaluate
@@ -613,8 +752,56 @@ class RealTimeMonitor:
 
         self.stats.wallets_evaluated += 1
         self.stats.last_evaluation_at = datetime.utcnow()
+        now = datetime.utcnow()
 
+        # ================================================================
+        # ENRICHMENT 1: Wallet profile (account age, tx count)
+        # ================================================================
+        profile = await self._enrich_wallet(wallet_address)
+        account_age_days = profile.account_age_days if profile else None
+        transaction_count = profile.transaction_count if profile else None
+
+        # ================================================================
+        # ENRICHMENT 2: Market info (actual resolution time, category)
+        # ================================================================
+        market_info = self._get_market_info(accumulation.market_id)
+
+        # Calculate ACTUAL hours until market resolution (not accumulation time)
+        event_hours_away = None
+        if market_info and market_info.end_date:
+            hours_until_resolution = (market_info.end_date - now).total_seconds() / 3600
+            if hours_until_resolution > 0:
+                event_hours_away = hours_until_resolution
+
+        market_category = market_info.category if market_info else None
+
+        # ================================================================
+        # ENRICHMENT 3: Sybil detection (funding source, cluster)
+        # ================================================================
+        funding_source = None
+        flagged_funders = None
+        cluster_wallets = None
+
+        if self.sybil_detector:
+            # Check if this wallet's funding source is flagged
+            try:
+                # Get funding source from profile or sybil detector
+                if profile and hasattr(profile, 'funding_source'):
+                    funding_source = profile.funding_source
+
+                # Get flagged funders set for matching
+                flagged_funders = self.sybil_detector.get_flagged_funding_sources()
+
+                # Check for cluster membership
+                cluster = self.sybil_detector.get_wallet_cluster(wallet_address)
+                if cluster:
+                    cluster_wallets = cluster.get("wallets", [])
+            except Exception as e:
+                logger.debug("sybil_lookup_error", error=str(e))
+
+        # ================================================================
         # Build position data for scorer
+        # ================================================================
         positions = [{
             "market_id": accumulation.market_id,
             "side": "YES",
@@ -625,16 +812,19 @@ class RealTimeMonitor:
             "won": None,
         }]
 
-        # Calculate timing (hours since first entry)
-        hours_accumulating = 0
-        if accumulation.first_entry:
-            hours_accumulating = (datetime.utcnow() - accumulation.first_entry).total_seconds() / 3600
-
-        # Score the wallet
+        # ================================================================
+        # Score with ALL available data
+        # ================================================================
         result = self.scorer.score_wallet(
             wallet_address=wallet_address,
+            account_age_days=account_age_days,
+            transaction_count=transaction_count,
             positions=positions,
-            event_hours_away=hours_accumulating if hours_accumulating < 72 else None,
+            market_category=market_category,
+            event_hours_away=event_hours_away,
+            funding_source=funding_source,
+            flagged_funders=flagged_funders,
+            cluster_wallets=cluster_wallets,
         )
 
         logger.debug(
@@ -643,6 +833,9 @@ class RealTimeMonitor:
             score=result.score,
             priority=result.priority,
             signals=result.signal_count,
+            account_age=account_age_days,
+            hours_to_resolution=round(event_hours_away, 1) if event_hours_away else None,
+            category=market_category.value if market_category else None,
         )
 
         # Check if meets alert threshold

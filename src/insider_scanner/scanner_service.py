@@ -239,6 +239,8 @@ class InsiderScannerService:
                 on_alert=self._on_insider_alert,
                 alert_threshold=self.insider_threshold,
             )
+            # Pass sybil detector reference for cluster/funding source lookup
+            self.monitor.sybil_detector = self.sybil_detector
             await self.monitor.start()
 
         # Start blockchain monitor for automatic sybil detection

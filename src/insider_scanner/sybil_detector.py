@@ -755,6 +755,58 @@ class SybilDetector:
         results.sort(key=lambda x: x["total_connections"], reverse=True)
         return results
 
+    def get_flagged_funding_sources(self) -> set:
+        """Get set of all indexed funding source addresses.
+
+        These are known addresses that have funded profitable traders,
+        useful for checking if a new wallet's funder is suspicious.
+
+        Returns:
+            Set of lowercase funding source addresses
+        """
+        return set(self._funding_source_index.keys())
+
+    def get_wallet_cluster(self, wallet_address: str) -> Optional[Dict]:
+        """Check if a wallet belongs to a known cluster.
+
+        Clusters are groups of wallets sharing funding sources or
+        withdrawal destinations.
+
+        Args:
+            wallet_address: Wallet to check
+
+        Returns:
+            Cluster info dict if found, None otherwise
+        """
+        wallet_lower = wallet_address.lower()
+
+        with self.session_factory() as session:
+            # Check if wallet is a known profitable trader
+            trader = session.query(KnownProfitableTrader).filter(
+                KnownProfitableTrader.wallet_address == wallet_lower
+            ).first()
+
+            if not trader or not trader.funding_source:
+                return None
+
+            funding_source = trader.funding_source.lower()
+
+            # Find other wallets funded by the same source
+            cluster_wallets = []
+            if funding_source in self._funding_source_index:
+                for info in self._funding_source_index[funding_source]:
+                    if info.get("wallet") != wallet_lower:
+                        cluster_wallets.append(info.get("wallet"))
+
+            if cluster_wallets:
+                return {
+                    "funding_source": funding_source,
+                    "wallets": cluster_wallets,
+                    "cluster_size": len(cluster_wallets) + 1,
+                }
+
+        return None
+
     def set_max_funded_traders_threshold(self, threshold: int) -> Dict[str, int]:
         """Update the max funded traders threshold and rebuild the index.
 
