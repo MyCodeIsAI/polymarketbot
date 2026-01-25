@@ -1044,10 +1044,11 @@
         // Load stats
         async function loadStats() {
             try {
-                const [sybilResp, docResp, insiderFundingResp] = await Promise.all([
+                const [sybilResp, docResp, insiderFundingResp, statusResp] = await Promise.all([
                     fetch(`${API_BASE}/sybil/stats`),
                     fetch(`${API_BASE}/documented-insiders`),
                     fetch(`${API_BASE}/insider-funding-sources`),
+                    fetch(`${API_BASE}/status`),
                 ]);
 
                 if (sybilResp.ok) {
@@ -1066,6 +1067,18 @@
                 if (insiderFundingResp.ok) {
                     const funding = await insiderFundingResp.json();
                     document.getElementById('statInsiderFunding').textContent = funding.total || 0;
+                }
+
+                // Update scanner status indicator
+                if (statusResp.ok) {
+                    const status = await statusResp.json();
+                    if (status.is_running) {
+                        document.getElementById('scannerStatus').className = 'status-dot running';
+                        document.getElementById('scannerStatusText').textContent = 'Running';
+                    } else {
+                        document.getElementById('scannerStatus').className = 'status-dot stopped';
+                        document.getElementById('scannerStatusText').textContent = 'Stopped';
+                    }
                 }
 
                 // Get insider flags count
