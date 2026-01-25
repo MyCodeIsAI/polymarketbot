@@ -354,6 +354,11 @@ class RealTimeMonitor:
             await self._ws_client.close()
             self._ws_client = None
 
+        # Close profile fetcher if we created it
+        if self._profile_fetcher:
+            await self._profile_fetcher.__aexit__(None, None, None)
+            self._profile_fetcher = None
+
         # Close data client if we own it
         if self._owns_client and self._data_client:
             await self._data_client.__aexit__(None, None, None)
@@ -531,7 +536,9 @@ class RealTimeMonitor:
             if self._data_client is None:
                 self._data_client = DataAPIClient()
                 await self._data_client.__aenter__()
+            # ProfileFetcher needs __aenter__ called to create gamma_client
             self._profile_fetcher = ProfileFetcher(self._data_client)
+            await self._profile_fetcher.__aenter__()
 
         try:
             # Fetch profile (includes account age, tx count from activity)
