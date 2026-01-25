@@ -663,8 +663,6 @@ async def get_scanner_status(db=Depends(get_session)):
                             uptime = (datetime.utcnow() - started).total_seconds()
 
                         bm = data.get("blockchain_monitor", {})
-                        last_scan = bm.get("last_scan_at")
-                        last_event = datetime.fromisoformat(last_scan) if last_scan else None
 
                         return ScannerStatusResponse(
                             is_running=True,
@@ -672,7 +670,7 @@ async def get_scanner_status(db=Depends(get_session)):
                             connected_markets=bm.get("blocks_scanned", 0),
                             wallets_monitored=data.get("insider", {}).get("wallets_scored", 0),
                             alerts_today=data.get("alerts", {}).get("total", 0),
-                            last_event_at=last_event,
+                            last_event_at=bm.get("last_scan_at"),  # Keep as string
                             uptime_seconds=uptime,
                         )
         except Exception as e:
