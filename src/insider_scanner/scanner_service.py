@@ -892,19 +892,37 @@ class InsiderScannerService:
 
 async def run_scanner_service():
     """Main entry point for the scanner service."""
+    import os
     import signal
     from aiohttp import web
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
 
     logger.info("Starting Insider Scanner Service...")
 
-    # Load configuration
-    config = ScannerConfig()
+    # Setup database
+    db_path = DATA_DIR / "scanner.db"
+    db_url = f"sqlite:///{db_path}"
+    engine = create_engine(db_url, echo=False)
+
+    # Create session factory
+    Session = sessionmaker(bind=engine)
+
+    def session_factory():
+        return Session()
+
+    # Get Polygonscan API key from environment
+    polygonscan_api_key = os.environ.get("POLYGONSCAN_API_KEY")
 
     # Create service
-    service = InsiderScannerService(config)
+    service = InsiderScannerService(
+        session_factory=session_factory,
+        polygonscan_api_key=polygonscan_api_key,
+        auto_populate=True,
+    )
 
     # Start the service
-    await service.start()
+    await service.start(mode=ScannerMode.FULL)
 
     # Setup web API for health checks and stats
     app = web.Application()
