@@ -304,13 +304,25 @@ class InsiderScannerService:
         logger.info("scanner_stopped", stats=self.stats.to_dict())
 
     async def _auto_populate_data(self) -> None:
-        """Auto-populate sybil detection data from files."""
+        """Auto-populate sybil detection data from files.
+
+        Priority order:
+        1. extraction_checkpoint.json - Full extraction data (if available locally)
+        2. sybil_defaults.json - Stripped defaults bundled with repo (1.2MB)
+        3. Individual files (profitable_wallets, funding_sources, etc.)
+        """
         logger.info("auto_populating_data", data_dir=str(DATA_DIR))
 
-        # Try checkpoint first (most up-to-date)
+        # Try checkpoint first (most up-to-date, local extraction)
         checkpoint_file = DATA_DIR / "extraction_checkpoint.json"
         if checkpoint_file.exists():
             await self._import_from_checkpoint(checkpoint_file)
+            return
+
+        # Try stripped defaults (bundled with repo for new deployments)
+        defaults_file = DATA_DIR / "sybil_defaults.json"
+        if defaults_file.exists():
+            await self._import_from_checkpoint(defaults_file)
             return
 
         # Fall back to completed files
