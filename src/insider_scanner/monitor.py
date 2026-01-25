@@ -319,11 +319,12 @@ class RealTimeMonitor:
 
             if token_ids:
                 # Subscribe to market channel with specific token IDs
-                # Polymarket CLOB WS expects: {"type": "subscribe", "channel": "market", "markets": [...]}
+                # Polymarket CLOB WS expects: {"type": "subscribe", "channel": "market", "assets_ids": [...]}
+                # Note: "markets" key causes immediate disconnect, must use "assets_ids"
                 await self._ws_client.subscribe({
                     "type": "subscribe",
                     "channel": "market",
-                    "markets": token_ids,
+                    "assets_ids": token_ids,
                 })
                 logger.info("ws_subscribed", token_count=len(token_ids))
             else:
