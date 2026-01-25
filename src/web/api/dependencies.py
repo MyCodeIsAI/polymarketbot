@@ -41,7 +41,12 @@ def get_db() -> DatabaseManager:
     global _db
 
     if _db is None:
-        db_path = Path.cwd() / "polymarketbot.db"
+        # Use data/scanner.db which contains the sybil detection data
+        # populated by the scanner service
+        db_path = Path.cwd() / "data" / "scanner.db"
+        if not db_path.exists():
+            # Fallback to old path for backwards compatibility
+            db_path = Path.cwd() / "polymarketbot.db"
         config = DatabaseConfig(url=f"sqlite:///{db_path}")
         _db = configure_database(config)
 
