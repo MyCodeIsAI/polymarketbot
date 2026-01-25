@@ -912,6 +912,10 @@ class SybilDetector:
         Returns:
             Dict with breakdown of exclusion reasons
         """
+        # Count sources that are dynamically excluded (high-volume but not hardcoded)
+        # Use set difference to avoid negative numbers
+        dynamic_high_volume = len(self._high_volume_sources - self._always_exclude)
+
         return {
             "always_excluded": {
                 "known_exchanges": len(self.KNOWN_EXCHANGE_ADDRESSES),
@@ -921,7 +925,7 @@ class SybilDetector:
             },
             "dynamic_excluded": {
                 "high_volume_threshold": self.max_funded_traders_threshold,
-                "high_volume_sources": len(self._high_volume_sources) - len(self._always_exclude),
+                "high_volume_sources": dynamic_high_volume,
             },
             "total_excluded": len(self._high_volume_sources),
             "indexed": {
