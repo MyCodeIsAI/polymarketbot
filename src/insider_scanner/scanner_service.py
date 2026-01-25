@@ -905,6 +905,15 @@ async def run_scanner_service():
     db_url = f"sqlite:///{db_path}"
     engine = create_engine(db_url, echo=False)
 
+    # Import Base and create all tables
+    from ..database.models import Base
+    from .models import (
+        FlaggedWallet, FlaggedFundingSource, KnownProfitableTrader,
+        KnownFundingSource, DetectionRecord
+    )
+    Base.metadata.create_all(engine)
+    logger.info("Database tables created/verified")
+
     # Create session factory
     Session = sessionmaker(bind=engine)
 
