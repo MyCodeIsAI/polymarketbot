@@ -61,6 +61,12 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+env_path = PROJECT_ROOT / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+
 from src.discovery.service import LeaderboardClient, LEADERBOARD_CATEGORIES
 from src.discovery.analyzer import LeaderboardEntry
 
