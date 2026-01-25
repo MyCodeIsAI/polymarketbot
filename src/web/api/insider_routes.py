@@ -626,13 +626,62 @@ async def _get_or_create_scanner(session_factory):
 
 @router.get("/status", response_model=ScannerStatusResponse)
 async def get_scanner_status(db=Depends(get_session)):
-    """Get current scanner status including real-time statistics."""
-    global _scanner_service
+    """Get current scanner status including real-time statistics.
 
-    if _scanner_service is None or not _scanner_service.is_running:
+    Checks systemd service status and queries scanner API if running.
+    """
+    import asyncio
+    import subprocess
+
+    # Check if the insider-scanner systemd service is running
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "insider-scanner"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        service_running = result.stdout.strip() == "active"
+    except Exception:
+        service_running = False
+
+    if service_running:
+        # Service is running - try to get detailed stats via internal API
+        import aiohttp
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "http://127.0.0.1:8080/api/stats",
+                    timeout=aiohttp.ClientTimeout(total=2)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+
+                        uptime = None
+                        if data.get("started_at"):
+                            started = datetime.fromisoformat(data["started_at"])
+                            uptime = (datetime.utcnow() - started).total_seconds()
+
+                        bm = data.get("blockchain_monitor", {})
+                        last_scan = bm.get("last_scan_at")
+                        last_event = datetime.fromisoformat(last_scan) if last_scan else None
+
+                        return ScannerStatusResponse(
+                            is_running=True,
+                            mode=data.get("mode", "full"),
+                            connected_markets=bm.get("blocks_scanned", 0),
+                            wallets_monitored=data.get("insider", {}).get("wallets_scored", 0),
+                            alerts_today=data.get("alerts", {}).get("total", 0),
+                            last_event_at=last_event,
+                            uptime_seconds=uptime,
+                        )
+        except Exception as e:
+            logger.debug("scanner_api_check_failed", error=str(e))
+
+        # Service running but can't get stats - return basic running status
         return ScannerStatusResponse(
-            is_running=False,
-            mode="stopped",
+            is_running=True,
+            mode="full",
             connected_markets=0,
             wallets_monitored=0,
             alerts_today=0,
@@ -640,23 +689,33 @@ async def get_scanner_status(db=Depends(get_session)):
             uptime_seconds=None,
         )
 
-    stats = _scanner_service.stats
-    uptime = None
-    if stats.started_at:
-        uptime = (datetime.utcnow() - stats.started_at).total_seconds()
+    # Check if we have in-process scanner
+    global _scanner_service
+    if _scanner_service is not None and _scanner_service.is_running:
+        stats = _scanner_service.stats
+        uptime = None
+        if stats.started_at:
+            uptime = (datetime.utcnow() - stats.started_at).total_seconds()
 
-    monitor_stats = {}
-    if _scanner_service.monitor:
-        monitor_stats = _scanner_service.monitor.stats.to_dict()
+        return ScannerStatusResponse(
+            is_running=True,
+            mode=stats.mode.value,
+            connected_markets=0,
+            wallets_monitored=stats.insider_wallets_scored,
+            alerts_today=stats.alerts_generated,
+            last_event_at=None,
+            uptime_seconds=uptime,
+        )
 
+    # No scanner running
     return ScannerStatusResponse(
-        is_running=True,
-        mode=stats.mode.value,
-        connected_markets=0,  # Would need market tracking
-        wallets_monitored=stats.insider_wallets_scored,
-        alerts_today=stats.alerts_generated,
-        last_event_at=monitor_stats.get("last_trade_at"),
-        uptime_seconds=uptime,
+        is_running=False,
+        mode="stopped",
+        connected_markets=0,
+        wallets_monitored=0,
+        alerts_today=0,
+        last_event_at=None,
+        uptime_seconds=None,
     )
 
 
@@ -672,62 +731,102 @@ async def start_scanner(
 ):
     """Start the insider scanner.
 
-    Modes:
-    - full: Both insider pattern detection and sybil detection (default)
-    - insider_only: Only insider pattern detection
-    - sybil_only: Only sybil detection (profitable trader alts)
+    Controls the insider-scanner systemd service.
     """
-    from ...insider_scanner.scanner_service import InsiderScannerService, ScannerMode
+    import subprocess
 
-    mode_str = request.mode if request else "full"
-    mode = ScannerMode(mode_str)
+    # Check if already running
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "insider-scanner"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.stdout.strip() == "active":
+            return {
+                "status": "already_running",
+                "mode": "full",
+                "message": "Scanner service is already running",
+            }
+    except Exception as e:
+        logger.warning("systemctl_check_failed", error=str(e))
 
-    scanner = await _get_or_create_scanner(make_session_factory(db))
-
-    if scanner.is_running:
-        return {
-            "status": "already_running",
-            "mode": scanner.mode.value,
-            "message": "Scanner is already running",
-            "stats": scanner.get_stats(),
-        }
-
-    success = await scanner.start(mode=mode)
-
-    if success:
-        logger.info("insider_scanner_started", mode=mode.value)
-        return {
-            "status": "started",
-            "mode": mode.value,
-            "message": f"Scanner started in {mode.value} mode",
-            "stats": scanner.get_stats(),
-        }
-    else:
+    # Start the systemd service
+    try:
+        result = subprocess.run(
+            ["systemctl", "start", "insider-scanner"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            logger.info("insider_scanner_started_via_systemd")
+            return {
+                "status": "started",
+                "mode": "full",
+                "message": "Scanner service started",
+            }
+        else:
+            return {
+                "status": "failed",
+                "message": f"Failed to start scanner: {result.stderr}",
+            }
+    except Exception as e:
         return {
             "status": "failed",
-            "message": "Failed to start scanner",
+            "message": f"Failed to start scanner: {str(e)}",
         }
 
 
 @router.post("/control/stop")
 async def stop_scanner():
-    """Stop the insider scanner."""
-    global _scanner_service
+    """Stop the insider scanner.
 
-    if _scanner_service is None or not _scanner_service.is_running:
+    Controls the insider-scanner systemd service.
+    """
+    import subprocess
+
+    # Check if running
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "insider-scanner"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.stdout.strip() != "active":
+            return {
+                "status": "not_running",
+                "message": "Scanner service is not running",
+            }
+    except Exception as e:
+        logger.warning("systemctl_check_failed", error=str(e))
+
+    # Stop the systemd service
+    try:
+        result = subprocess.run(
+            ["systemctl", "stop", "insider-scanner"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            logger.info("insider_scanner_stopped_via_systemd")
+            return {
+                "status": "stopped",
+                "message": "Scanner service stopped",
+            }
+        else:
+            return {
+                "status": "failed",
+                "message": f"Failed to stop scanner: {result.stderr}",
+            }
+    except Exception as e:
         return {
-            "status": "not_running",
-            "message": "Scanner is not running",
+            "status": "failed",
+            "message": f"Failed to stop scanner: {str(e)}",
         }
-
-    await _scanner_service.stop()
-
-    logger.info("insider_scanner_stopped")
-    return {
-        "status": "stopped",
-        "message": "Scanner stopped successfully",
-        "final_stats": _scanner_service.get_stats(),
-    }
 
 
 @router.get("/control/stats")
