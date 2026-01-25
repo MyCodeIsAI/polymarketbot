@@ -1,0 +1,19 @@
+[Unit]
+Description=Polymarket Insider Scanner
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/polymarketbot
+EnvironmentFile=/root/polymarketbot/.env
+Environment=PYTHONPATH=/root/polymarketbot
+ExecStart=/root/polymarketbot/venv/bin/python -m src.insider_scanner.scanner_service
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
