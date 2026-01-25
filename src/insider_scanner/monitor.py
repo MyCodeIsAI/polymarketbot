@@ -132,12 +132,23 @@ class WalletAccumulation:
 
 
 @dataclass
+class AlertRecord:
+    """Tracks alert history for cumulative monitoring."""
+    last_alert_at: datetime
+    last_position_usd: float
+    last_score: float
+    alert_count: int = 1
+
+
+@dataclass
 class MonitorStats:
     """Statistics for monitor operation."""
     started_at: Optional[datetime] = None
     trades_processed: int = 0
     wallets_evaluated: int = 0
     alerts_generated: int = 0
+    watchlist_additions: int = 0  # Soft-flagged wallets
+    watchlist_upgrades: int = 0   # Watchlist → Alert promotions
     websocket_uptime_s: float = 0
     polling_cycles: int = 0
     last_trade_at: Optional[datetime] = None
@@ -149,6 +160,8 @@ class MonitorStats:
             "trades_processed": self.trades_processed,
             "wallets_evaluated": self.wallets_evaluated,
             "alerts_generated": self.alerts_generated,
+            "watchlist_additions": self.watchlist_additions,
+            "watchlist_upgrades": self.watchlist_upgrades,
             "websocket_uptime_s": round(self.websocket_uptime_s, 2),
             "polling_cycles": self.polling_cycles,
             "last_trade_at": self.last_trade_at.isoformat() if self.last_trade_at else None,
@@ -188,18 +201,27 @@ class RealTimeMonitor:
         scorer: Optional[InsiderScorer] = None,
         data_client: Optional[DataAPIClient] = None,
         on_alert: Optional[AlertCallback] = None,
-        alert_threshold: float = 55.0,
+        alert_threshold: float = 50.0,
+        watchlist_threshold: float = 35.0,
         polling_interval_s: float = 30.0,
         accumulation_window_hours: float = 24.0,
         min_position_usd: float = 5000.0,
     ):
         """Initialize real-time monitor.
 
+        Implements two-tier monitoring:
+        - WATCHLIST (35-49): Soft-flag, track for cumulative growth, no UI alert
+        - ALERT (50+): Generate UI notification
+
+        Watchlist wallets are re-evaluated on each new trade. If cumulative
+        position pushes them to 50+, they upgrade to ALERT tier.
+
         Args:
             scorer: InsiderScorer instance (created if not provided)
             data_client: DataAPIClient for polling fallback
             on_alert: Callback for when suspicious wallet detected
-            alert_threshold: Minimum score to trigger alert
+            alert_threshold: Minimum score to trigger ALERT (default 50)
+            watchlist_threshold: Minimum score to add to WATCHLIST (default 35)
             polling_interval_s: Seconds between polling cycles
             accumulation_window_hours: Hours to track accumulation
             min_position_usd: Minimum USD position to evaluate
@@ -209,6 +231,7 @@ class RealTimeMonitor:
         self._owns_client = data_client is None
         self.on_alert = on_alert
         self.alert_threshold = alert_threshold
+        self.watchlist_threshold = watchlist_threshold
         self.polling_interval_s = polling_interval_s
         self.accumulation_window_hours = accumulation_window_hours
         self.min_position_usd = min_position_usd
@@ -225,8 +248,11 @@ class RealTimeMonitor:
 
         # Tracking
         self._accumulations: Dict[str, WalletAccumulation] = {}  # wallet:market -> accumulation
-        self._alerted_wallets: set = set()  # Don't re-alert same wallet
         self._processed_trade_ids: set = set()  # Dedup across polling cycles
+
+        # Two-tier monitoring
+        self._watchlist: Dict[str, AlertRecord] = {}  # wallet:market -> soft-flagged, no UI alert
+        self._alert_history: Dict[str, AlertRecord] = {}  # wallet:market -> alerted, has UI alert
         self._max_processed_ids = 5000  # Limit memory usage
         self._last_poll_timestamp: Optional[datetime] = None
 
@@ -251,6 +277,28 @@ class RealTimeMonitor:
     def is_running(self) -> bool:
         """Check if monitor is running."""
         return self._state in (MonitorState.RUNNING, MonitorState.DEGRADED)
+
+    @property
+    def watchlist_count(self) -> int:
+        """Get count of soft-flagged wallets being monitored."""
+        return len(self._watchlist)
+
+    def get_watchlist(self) -> List[Dict]:
+        """Get current watchlist for debugging/UI.
+
+        Returns list of soft-flagged wallets with their scores and positions.
+        """
+        return [
+            {
+                "key": key,
+                "wallet": key.split(":")[0],
+                "market": key.split(":")[1] if ":" in key else "",
+                "score": record.last_score,
+                "position_usd": record.last_position_usd,
+                "first_seen": record.last_alert_at.isoformat(),
+            }
+            for key, record in self._watchlist.items()
+        ]
 
     async def start(self) -> bool:
         """Start the real-time monitor.
@@ -745,10 +793,38 @@ class RealTimeMonitor:
             wallet_address: Wallet to evaluate
             accumulation: Current accumulation data
         """
-        # Skip if already alerted for this wallet+market
+        # Two-tier monitoring: Check current status
         alert_key = f"{wallet_address}:{accumulation.market_id}"
-        if alert_key in self._alerted_wallets:
-            return
+        current_usd = float(accumulation.total_usd)
+        now = datetime.utcnow()
+
+        # Case 1: Already alerted - check for significant growth
+        prior_alert = self._alert_history.get(alert_key)
+        if prior_alert:
+            growth = (current_usd - prior_alert.last_position_usd) / max(prior_alert.last_position_usd, 1)
+            minutes_since = (now - prior_alert.last_alert_at).total_seconds() / 60
+
+            # Only re-evaluate if position grew 50%+ and 10+ minutes passed
+            if growth < 0.5 or minutes_since < 10:
+                return
+
+            logger.debug(
+                "alert_rescore_triggered",
+                wallet=wallet_address[:10] + "...",
+                growth_pct=round(growth * 100, 1),
+            )
+            # Continue to full evaluation below...
+
+        # Case 2: On watchlist - always re-evaluate (cumulative monitoring)
+        watchlist_entry = self._watchlist.get(alert_key)
+        if watchlist_entry and not prior_alert:
+            logger.debug(
+                "watchlist_rescore",
+                wallet=wallet_address[:10] + "...",
+                prior_usd=watchlist_entry.last_position_usd,
+                current_usd=current_usd,
+            )
+            # Continue to full evaluation below...
 
         self.stats.wallets_evaluated += 1
         self.stats.last_evaluation_at = datetime.utcnow()
@@ -838,9 +914,47 @@ class RealTimeMonitor:
             category=market_category.value if market_category else None,
         )
 
-        # Check if meets alert threshold
+        # Two-tier decision logic
+        alert_key = f"{wallet_address}:{accumulation.market_id}"
+        current_usd = float(accumulation.total_usd)
+
         if result.score >= self.alert_threshold:
+            # ALERT TIER: Generate UI notification
+            was_on_watchlist = alert_key in self._watchlist
+
             await self._generate_alert(wallet_address, result, accumulation)
+
+            # Remove from watchlist if it was there (promoted to alert)
+            if was_on_watchlist:
+                del self._watchlist[alert_key]
+                self.stats.watchlist_upgrades += 1
+                logger.info(
+                    "watchlist_upgraded_to_alert",
+                    wallet=wallet_address[:10] + "...",
+                    score=result.score,
+                )
+
+        elif result.score >= self.watchlist_threshold:
+            # WATCHLIST TIER: Soft-flag for cumulative monitoring (no UI alert)
+            if alert_key not in self._watchlist and alert_key not in self._alert_history:
+                self._watchlist[alert_key] = AlertRecord(
+                    last_alert_at=datetime.utcnow(),
+                    last_position_usd=current_usd,
+                    last_score=result.score,
+                )
+                self.stats.watchlist_additions += 1
+                logger.info(
+                    "watchlist_added",
+                    wallet=wallet_address[:10] + "...",
+                    score=result.score,
+                    position_usd=current_usd,
+                )
+            elif alert_key in self._watchlist:
+                # Update existing watchlist entry
+                entry = self._watchlist[alert_key]
+                entry.last_alert_at = datetime.utcnow()
+                entry.last_position_usd = current_usd
+                entry.last_score = result.score
 
     async def _generate_alert(
         self,
@@ -848,7 +962,10 @@ class RealTimeMonitor:
         result: ScoringResult,
         accumulation: WalletAccumulation,
     ) -> None:
-        """Generate an alert for suspicious wallet.
+        """Generate an alert for suspicious wallet (score >= alert_threshold).
+
+        Tracks alert history for cumulative monitoring - wallets that have
+        already been alerted are re-evaluated when positions grow significantly.
 
         Args:
             wallet_address: Suspicious wallet
@@ -856,20 +973,48 @@ class RealTimeMonitor:
             accumulation: Position accumulation data
         """
         alert_key = f"{wallet_address}:{accumulation.market_id}"
-        self._alerted_wallets.add(alert_key)
-        self.stats.alerts_generated += 1
+        current_usd = float(accumulation.total_usd)
+        prior_alert = self._alert_history.get(alert_key)
 
-        logger.warning(
-            "insider_alert",
-            wallet=wallet_address,
-            score=result.score,
-            priority=result.priority,
-            market=accumulation.market_id,
-            position_usd=float(accumulation.total_usd),
-            entries=accumulation.entry_count,
-        )
+        if prior_alert:
+            # Re-alert: Only notify if score increased or position doubled
+            if result.score <= prior_alert.last_score and current_usd < prior_alert.last_position_usd * 2:
+                return  # Not significant enough change
 
-        # Call alert callback
+            prior_alert.last_alert_at = datetime.utcnow()
+            prior_alert.last_position_usd = current_usd
+            prior_alert.last_score = result.score
+            prior_alert.alert_count += 1
+
+            logger.warning(
+                "insider_alert_updated",
+                wallet=wallet_address,
+                score=result.score,
+                priority=result.priority,
+                market=accumulation.market_id,
+                position_usd=current_usd,
+                alert_count=prior_alert.alert_count,
+            )
+        else:
+            # First alert
+            self._alert_history[alert_key] = AlertRecord(
+                last_alert_at=datetime.utcnow(),
+                last_position_usd=current_usd,
+                last_score=result.score,
+            )
+            self.stats.alerts_generated += 1
+
+            logger.warning(
+                "insider_alert",
+                wallet=wallet_address,
+                score=result.score,
+                priority=result.priority,
+                market=accumulation.market_id,
+                position_usd=current_usd,
+                entries=accumulation.entry_count,
+            )
+
+        # Call alert callback for UI notification
         if self.on_alert:
             try:
                 await self.on_alert(wallet_address, result, accumulation)
@@ -921,9 +1066,10 @@ class RealTimeMonitor:
         return sorted(accumulations, key=lambda a: a.total_usd, reverse=True)
 
     def clear_alerts(self) -> None:
-        """Clear alerted wallets to allow re-alerting."""
-        self._alerted_wallets.clear()
-        logger.info("alerts_cleared")
+        """Clear alerted wallets and watchlist to allow re-evaluation."""
+        self._alert_history.clear()
+        self._watchlist.clear()
+        logger.info("alerts_cleared", alert_history=0, watchlist=0)
 
 
 class NewWalletMonitor:

@@ -1,11 +1,11 @@
 {
   "metadata": {
-    "generated_at": "2026-01-24T21:00:00Z",
+    "generated_at": "2026-01-25T20:00:00Z",
     "description": "Documented insider trading accounts from footprint analysis",
     "source": "docs/insider-scanner/footprints/*.md",
     "purpose": "Scanner integration for funding source/withdrawal destination analysis",
-    "total_accounts": 18,
-    "verified_wallets": 9,
+    "total_accounts": 22,
+    "verified_wallets": 13,
     "partial_wallets": 3,
     "unknown_wallets": 9
   },
@@ -653,6 +653,79 @@
       "sources": [
         "https://finance.yahoo.com/news/polymarket-insider-venezuela-bet-allegedly-205757379.html"
       ]
+    },
+    {
+      "id": "fed_chair_cluster",
+      "wallet_address": null,
+      "wallet_verified": true,
+      "is_cluster": true,
+      "cluster_size": 4,
+      "username": null,
+      "category": "government_policy",
+      "subcategory": "fed_chair_nomination",
+      "documented_investment_usd": 450000,
+      "documented_trades": 600,
+      "status": "active",
+      "investigation_status": "monitoring",
+      "signals": [
+        "single_market_focus",
+        "pre_event_timing",
+        "large_position",
+        "new_account",
+        "category_specialization"
+      ],
+      "characteristics": {
+        "wallets_count": 4,
+        "entry_odds_range": [0.06, 0.27],
+        "trading_window": "Jan 19-22, 2026",
+        "event": "Trump praises Rieder Jan 22, 2026"
+      },
+      "notable_trades": [
+        {
+          "wallet": "0x1138c6c14b9f3b6edd719d0b7b471bd896afe410",
+          "username": "HD2",
+          "market": "Rick Rieder Fed Chair YES",
+          "investment_usd": 96520,
+          "current_value_usd": 266652,
+          "unrealized_pnl": 170132,
+          "entry_price": 0.1786,
+          "suspicion_score": 95
+        },
+        {
+          "wallet": "0xa94e3cae6e3917e8243b13e06f8f5ce5f27a24e0",
+          "username": "msk11",
+          "market": "Rick Rieder Fed Chair YES",
+          "current_value_usd": 61097,
+          "unrealized_pnl": 59616,
+          "suspicion_score": 55
+        },
+        {
+          "wallet": "0xee1706b93845d50ea60e49219be7311a2ebb6ea1",
+          "username": "jwerhor",
+          "market": "Rick Rieder Fed Chair YES",
+          "current_value_usd": 61856,
+          "unrealized_pnl": 36764,
+          "suspicion_score": 50
+        },
+        {
+          "wallet": "0xd1acd3925d895de9aec98ff95f3a30c5279d08d5",
+          "username": "Kickstand7",
+          "market": "Kevin Hassett Fed Chair YES",
+          "current_value_usd": 9577,
+          "suspicion_score": 50
+        }
+      ],
+      "cluster_wallets": {
+        "hd2": "0x1138c6c14b9f3b6edd719d0b7b471bd896afe410",
+        "msk11": "0xa94e3cae6e3917e8243b13e06f8f5ce5f27a24e0",
+        "jwerhor": "0xee1706b93845d50ea60e49219be7311a2ebb6ea1",
+        "kickstand7": "0xd1acd3925d895de9aec98ff95f3a30c5279d08d5"
+      },
+      "footprint_file": "FED-CHAIR-CLUSTER.md",
+      "sources": [
+        "https://polymarket.com/event/who-will-trump-nominate-as-fed-chair",
+        "https://www.cnbc.com/2026/01/22/rieder-odds-rising-for-fed-chair-after-trump-calls-blackrock-executive-very-impressive.html"
+      ]
     }
   ],
   "funding_sources_to_monitor": [
@@ -684,7 +757,11 @@
       "0xee50a31c3f5a7c77824b12a941a54388a2827ed6",
       "0x0afc7ce56285bde1fbe3a75efaffdfc86d6530b2",
       "0x31a56e9e690c621ed21de08cb559e9524cdb8ed9",
-      "0x551e72eda42a5ab39d6d78239a1d9bbb5db6b0e0"
+      "0x551e72eda42a5ab39d6d78239a1d9bbb5db6b0e0",
+      "0x1138c6c14b9f3b6edd719d0b7b471bd896afe410",
+      "0xa94e3cae6e3917e8243b13e06f8f5ce5f27a24e0",
+      "0xee1706b93845d50ea60e49219be7311a2ebb6ea1",
+      "0xd1acd3925d895de9aec98ff95f3a30c5279d08d5"
     ],
     "known_insider_usernames": [
       "ricosuave666",
@@ -698,7 +775,11 @@
       "SBet365",
       "mutualdelta",
       "bigwinner01",
-      "Annica"
+      "Annica",
+      "HD2",
+      "msk11",
+      "jwerhor",
+      "Kickstand7"
     ],
     "high_risk_categories": [
       "military",

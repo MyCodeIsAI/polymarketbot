@@ -142,7 +142,7 @@ class InsiderScannerService:
         session_factory: Callable[[], Session],
         alert_manager: Optional[InsiderAlertManager] = None,
         polygonscan_api_key: Optional[str] = None,
-        insider_threshold: float = 55.0,
+        insider_threshold: float = 50.0,
         sybil_high_volume_threshold: int = 10,
         auto_populate: bool = True,
     ):
@@ -152,7 +152,7 @@ class InsiderScannerService:
             session_factory: Factory function returning database sessions
             alert_manager: Optional alert manager (created if not provided)
             polygonscan_api_key: API key for Polygonscan funding extraction
-            insider_threshold: Minimum score to flag as insider (default 55)
+            insider_threshold: Minimum score to flag as insider (default 50)
             sybil_high_volume_threshold: Max traders a source can fund before exclusion
             auto_populate: Whether to auto-load data from files on start
         """

@@ -102,7 +102,7 @@
 
 1. **Military operations are classified:** Exact timing requires intel access
 2. **100% win rate statistically improbable:** Random chance ~0.8% for 7/7
-3. **Exact day predictions:** Beyond OSINT capability
+3. **Exact day predictions:** Beyond public information analysis capability
 4. **Consistent dormancy:** Only activates when operation imminent
 5. **Evasion behavior:** Suggests awareness of wrongdoing
 
