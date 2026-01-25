@@ -47,10 +47,10 @@ class InsiderScannerSettings:
     auto_reconnect: bool = True
     max_reconnect_delay_seconds: int = 30
 
-    # Scoring thresholds
+    # Scoring thresholds (MEDIUM lowered 55→50 per Fed Chair cluster analysis)
     score_critical_threshold: float = 85.0
     score_high_threshold: float = 70.0
-    score_medium_threshold: float = 55.0
+    score_medium_threshold: float = 50.0
     score_low_threshold: float = 40.0
 
     # Alert configuration

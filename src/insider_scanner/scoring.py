@@ -122,10 +122,12 @@ class InsiderScorer:
     MAX_CLUSTER = 20
 
     # Minimum requirements for each priority level
+    # MEDIUM threshold lowered from 55 to 50 based on Fed Chair cluster
+    # analysis - ensures we catch insiders using accumulation patterns
     MIN_REQUIREMENTS = {
         "critical": {"score": 85, "signals": 5, "dimensions": 3},
         "high": {"score": 70, "signals": 4, "dimensions": 2},
-        "medium": {"score": 55, "signals": 3, "dimensions": 2},
+        "medium": {"score": 50, "signals": 3, "dimensions": 2},
         "low": {"score": 40, "signals": 2, "dimensions": 1},
     }
 
@@ -498,14 +500,21 @@ class InsiderScorer:
         return total_value / total_weight
 
     def _score_entry_odds(self, odds: float) -> float:
-        """Score based on entry odds (with variance)."""
+        """Score based on entry odds (with variance).
+
+        The 10-30% range is the "insider sweet spot" - low enough to be
+        profitable but not so extreme it's obvious. Increased scoring
+        for this range based on Fed Chair cluster analysis (Jan 2026).
+        """
         if odds < 0.05:
             return 8  # Extreme longshot
         elif odds < 0.10:
-            return 6  # Longshot
+            return 7  # Longshot (increased from 6)
         elif odds < 0.20:
-            return 4  # Moderate longshot
-        elif odds < 0.35:
+            return 6  # Insider sweet spot low (increased from 4)
+        elif odds < 0.30:
+            return 5  # Insider sweet spot high (increased from 2)
+        elif odds < 0.45:
             return 2  # Moderate
         elif odds < 0.60:
             return 1  # Consensus (variance allowance for GayPride case)
@@ -695,11 +704,15 @@ class InsiderScorer:
         return score
 
     def _score_market_category(self, category: MarketCategory) -> float:
-        """Score based on market category risk level."""
+        """Score based on market category risk level.
+
+        GOVERNMENT_POLICY increased to 10 (from 7) based on Fed Chair
+        cluster analysis - these markets have highest insider risk.
+        """
         category_scores = {
-            MarketCategory.MILITARY: 8,
-            MarketCategory.GOVERNMENT_POLICY: 7,
-            MarketCategory.ELECTION: 6,
+            MarketCategory.MILITARY: 10,          # Increased from 8
+            MarketCategory.GOVERNMENT_POLICY: 10, # Increased from 7
+            MarketCategory.ELECTION: 7,           # Increased from 6
             MarketCategory.CORPORATE: 5,
             MarketCategory.AWARDS: 5,
             MarketCategory.SPORTS: 4,
