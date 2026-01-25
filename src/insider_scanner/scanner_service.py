@@ -884,3 +884,83 @@ class InsiderScannerService:
 
         await self._auto_populate_data()
         return self.sybil_detector.rebuild_index()
+
+
+# ============================================================================
+# Main entry point for running as a service
+# ============================================================================
+
+async def run_scanner_service():
+    """Main entry point for the scanner service."""
+    import signal
+    from aiohttp import web
+
+    logger.info("Starting Insider Scanner Service...")
+
+    # Load configuration
+    config = ScannerConfig()
+
+    # Create service
+    service = InsiderScannerService(config)
+
+    # Start the service
+    await service.start()
+
+    # Setup web API for health checks and stats
+    app = web.Application()
+
+    async def health_handler(request):
+        return web.json_response({"status": "healthy", "service": "insider-scanner"})
+
+    async def stats_handler(request):
+        stats = service.get_stats()
+        return web.json_response(stats)
+
+    async def alerts_handler(request):
+        with service.session_factory() as session:
+            alerts = session.query(FlaggedWallet).order_by(
+                FlaggedWallet.flagged_at.desc()
+            ).limit(50).all()
+            return web.json_response([{
+                "wallet": a.wallet_address,
+                "score": a.insider_score,
+                "flagged_at": a.flagged_at.isoformat() if a.flagged_at else None,
+                "market_id": a.market_id,
+            } for a in alerts])
+
+    app.router.add_get('/health', health_handler)
+    app.router.add_get('/api/stats', stats_handler)
+    app.router.add_get('/api/alerts', alerts_handler)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+
+    logger.info("API server started on port 8080")
+
+    # Setup shutdown handler
+    shutdown_event = asyncio.Event()
+
+    def signal_handler():
+        logger.info("Shutdown signal received")
+        shutdown_event.set()
+
+    loop = asyncio.get_event_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, signal_handler)
+
+    logger.info("Scanner service running. Monitoring for insider activity...")
+
+    # Keep running until shutdown
+    await shutdown_event.wait()
+
+    # Cleanup
+    logger.info("Shutting down scanner service...")
+    await service.stop()
+    await runner.cleanup()
+    logger.info("Scanner service stopped.")
+
+
+if __name__ == "__main__":
+    asyncio.run(run_scanner_service())
