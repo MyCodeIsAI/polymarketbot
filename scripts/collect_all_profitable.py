@@ -9,8 +9,12 @@ import asyncio
 import sys
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 
-sys.path.insert(0, "/home/user/Documents/polymarketbot")
+# Add project root to path
+SCRIPT_DIR = Path(__file__).parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.discovery.service import LeaderboardClient, LEADERBOARD_CATEGORIES
 from src.discovery.analyzer import LeaderboardEntry
@@ -127,9 +131,8 @@ async def main():
     print(f"  Lowest:    ${pnls[-1]:>12,.0f}" if pnls else "")
 
     # Save to simple file for verification
-    output_file = "/home/user/Documents/polymarketbot/data/profitable_accounts.txt"
-    import os
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    output_file = PROJECT_ROOT / "data" / "profitable_accounts.txt"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_file, "w") as f:
         f.write(f"# Accounts with >= ${MIN_PROFIT_USD:,.0f} profit\n")

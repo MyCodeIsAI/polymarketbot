@@ -3,8 +3,12 @@
 
 import asyncio
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "/home/user/Documents/polymarketbot")
+# Add project root to path
+SCRIPT_DIR = Path(__file__).parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.discovery.service import DiscoveryService, ScanConfig
 from src.discovery.models import DiscoveryMode

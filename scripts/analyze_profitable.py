@@ -16,14 +16,18 @@ from decimal import Decimal
 from dataclasses import dataclass
 from typing import Optional
 import json
+from pathlib import Path
 
-sys.path.insert(0, "/home/user/Documents/polymarketbot")
+# Add project root to path
+SCRIPT_DIR = Path(__file__).parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.api.data import DataAPIClient, ActivityType
 
-# Load accounts from file
-ACCOUNTS_FILE = "/home/user/Documents/polymarketbot/data/profitable_accounts.txt"
-ANALYSIS_OUTPUT = "/home/user/Documents/polymarketbot/data/analyzed_accounts.json"
+# Load accounts from file (relative to project root)
+ACCOUNTS_FILE = PROJECT_ROOT / "data" / "profitable_accounts.txt"
+ANALYSIS_OUTPUT = PROJECT_ROOT / "data" / "analyzed_accounts.json"
 
 
 @dataclass
