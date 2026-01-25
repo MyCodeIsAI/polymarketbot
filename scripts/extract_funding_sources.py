@@ -57,7 +57,9 @@ from typing import Optional
 import httpx
 
 # Add parent to path for imports
-sys.path.insert(0, "/home/user/Documents/polymarketbot")
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.discovery.service import LeaderboardClient, LEADERBOARD_CATEGORIES
 from src.discovery.analyzer import LeaderboardEntry
@@ -1148,7 +1150,7 @@ async def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="/home/user/Documents/polymarketbot/data",
+        default=str(PROJECT_ROOT / "data"),
         help="Output directory for results",
     )
     parser.add_argument(
