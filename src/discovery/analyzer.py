@@ -1211,9 +1211,36 @@ class AccountAnalyzer:
         return trades
 
     async def _fetch_positions(self, wallet: str) -> list[Position]:
-        """Fetch current positions."""
-        self._stats["api_calls"] += 1
-        return await self._data_client.get_positions(user=wallet, limit=500)
+        """Fetch ALL current positions with pagination.
+
+        Some accounts have 1000+ positions, so we need to paginate
+        to get accurate unrealized P/L for watermark calculations.
+        """
+        all_positions: list[Position] = []
+        offset = 0
+        batch_size = 100
+        max_positions = 2000  # Safety limit
+
+        while len(all_positions) < max_positions:
+            self._stats["api_calls"] += 1
+            batch = await self._data_client.get_positions(
+                user=wallet,
+                limit=batch_size,
+                offset=offset
+            )
+
+            if not batch:
+                break
+
+            all_positions.extend(batch)
+
+            if len(batch) < batch_size:
+                # No more positions
+                break
+
+            offset += batch_size
+
+        return all_positions
 
     async def _get_market_title(self, condition_id: str) -> str:
         """Get market title, using cache."""
