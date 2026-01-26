@@ -509,7 +509,14 @@ class RealTimeMonitor:
             MarketCategory if detected, None otherwise
         """
         title = (event.get("title") or "").lower()
-        tags = [t.lower() for t in (event.get("tags") or [])]
+        # Tags can be strings or dicts like {"label": "politics"}
+        raw_tags = event.get("tags") or []
+        tags = []
+        for t in raw_tags:
+            if isinstance(t, str):
+                tags.append(t.lower())
+            elif isinstance(t, dict):
+                tags.append((t.get("label") or t.get("name") or "").lower())
         slug = (event.get("slug") or "").lower()
         combined = f"{title} {' '.join(tags)} {slug}"
 
