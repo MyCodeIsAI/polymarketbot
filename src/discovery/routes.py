@@ -44,18 +44,26 @@ _analyzed_accounts_mtime: float = 0
 
 
 def _get_analyzed_accounts_cached() -> Dict[str, Any]:
-    """Load analyzed accounts with caching to avoid repeated disk reads."""
+    """Load analyzed accounts with caching to avoid repeated disk reads.
+
+    Uses slim file (6MB) instead of full file (578MB) for low-memory VPS compatibility.
+    The slim file has all filter/column data but excludes heavy fields like pl_curve_data.
+    """
     global _analyzed_accounts_cache, _analyzed_accounts_mtime
     import json
 
-    data_file = DATA_DIR / "analyzed_accounts.json"
+    # Prefer slim file (6MB) over full file (578MB) for memory efficiency
+    slim_file = DATA_DIR / "analyzed_accounts_slim.json"
+    full_file = DATA_DIR / "analyzed_accounts.json"
+
+    data_file = slim_file if slim_file.exists() else full_file
     if not data_file.exists():
         return {"accounts": [], "total_analyzed": 0}
 
     # Check if file has changed
     current_mtime = data_file.stat().st_mtime
     if _analyzed_accounts_cache is None or current_mtime != _analyzed_accounts_mtime:
-        logger.info("Loading analyzed accounts from disk (this may take a moment)...")
+        logger.info(f"Loading analyzed accounts from {data_file.name}...")
         with open(data_file) as f:
             _analyzed_accounts_cache = json.load(f)
         _analyzed_accounts_mtime = current_mtime
