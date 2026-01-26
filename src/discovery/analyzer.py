@@ -331,6 +331,7 @@ class AccountAnalyzer:
         self,
         entry: LeaderboardEntry,
         min_trades: int = 50,
+        max_trades: int = None,
         min_pnl: Decimal = Decimal("0"),
         max_avg_position: Decimal = Decimal("1000"),
     ) -> QuickFilterResult:
@@ -339,6 +340,7 @@ class AccountAnalyzer:
         Args:
             entry: Leaderboard data
             min_trades: Minimum trades required
+            max_trades: Maximum trades allowed (filter out HFT bots)
             min_pnl: Minimum total P/L required
             max_avg_position: Maximum average position size
 
@@ -353,6 +355,8 @@ class AccountAnalyzer:
         # Use config thresholds if available
         if "min_trades" in config.hard_filters:
             min_trades = int(config.hard_filters["min_trades"].threshold)
+        if "max_trades" in config.hard_filters:
+            max_trades = int(config.hard_filters["max_trades"].threshold)
         if "must_be_profitable" in config.hard_filters:
             min_pnl = Decimal(str(config.hard_filters["must_be_profitable"].threshold))
         if "max_avg_position" in config.hard_filters:
@@ -372,6 +376,17 @@ class AccountAnalyzer:
                 wallet_address=entry.wallet_address,
                 passed=False,
                 rejection_reason=f"Insufficient trades: {entry.num_trades} < {min_trades}",
+                total_pnl=entry.total_pnl,
+                num_trades=entry.num_trades,
+                estimated_avg_position=estimated_avg,
+            )
+
+        # HFT filter: reject accounts with too many trades (likely bots)
+        if max_trades is not None and entry.num_trades > 0 and entry.num_trades > max_trades:
+            return QuickFilterResult(
+                wallet_address=entry.wallet_address,
+                passed=False,
+                rejection_reason=f"HFT filter: {entry.num_trades:,} > {max_trades:,} trades",
                 total_pnl=entry.total_pnl,
                 num_trades=entry.num_trades,
                 estimated_avg_position=estimated_avg,
@@ -759,8 +774,17 @@ class AccountAnalyzer:
             # Fetch current positions (1 API call)
             positions = await self._fetch_positions(wallet)
 
+            # Calculate total unrealized P/L from open positions
+            # This is critical for the off_high_watermark calculation
+            total_unrealized_pnl = sum(
+                float(getattr(p, 'unrealized_pnl', 0) or 0)
+                for p in positions
+            )
+
             # Compute all metrics
             pl_metrics = self._compute_pl_metrics(trades)
+            # Store unrealized P/L in metrics for off_high_watermark calculation
+            pl_metrics.unrealized_pnl = total_unrealized_pnl
             pattern_metrics = self._compute_pattern_metrics(trades)
             market_categories = self._compute_category_breakdown(trades)
 
@@ -827,6 +851,7 @@ class AccountAnalyzer:
         max_concurrent: int = 3,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
         max_trades: int = 500,
+        enable_categorization: bool = False,
     ) -> list[DeepAnalysisResult]:
         """Batch deep analysis with limited concurrency.
 
@@ -836,10 +861,12 @@ class AccountAnalyzer:
             max_concurrent: Max concurrent analyses
             progress_callback: Callback(completed, total, current_wallet)
             max_trades: Maximum trades to fetch per account
+            enable_categorization: Force category detection even in wide_net mode
 
         Returns:
             List of DeepAnalysisResult
         """
+        self._enable_categorization = enable_categorization
         results = []
         semaphore = asyncio.Semaphore(max_concurrent)
         completed = 0
@@ -1123,8 +1150,11 @@ class AccountAnalyzer:
 
         trades = []
 
-        # Wide net mode: skip expensive market categorization - we don't use it
-        skip_categorization = self.mode == DiscoveryMode.WIDE_NET_PROFITABILITY
+        # Wide net mode: skip expensive market categorization unless explicitly enabled
+        skip_categorization = (
+            self.mode == DiscoveryMode.WIDE_NET_PROFITABILITY
+            and not getattr(self, '_enable_categorization', False)
+        )
 
         for activity in all_activities:
             # Only process activities that affect positions/P&L

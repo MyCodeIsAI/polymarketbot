@@ -661,14 +661,23 @@ def create_wide_net_profitability_config() -> ModeConfig:
                 threshold_min=1,
                 threshold_max=100,
             ),
-            "min_total_pnl": FilterConfig(
+            "max_trades": FilterConfig(
+                name="Maximum Trades (HFT Filter)",
+                description="Filter out high-frequency trading bots",
+                is_hard_filter=True,
+                enabled=False,  # Disabled by default, enabled via config
+                threshold=5000,
+                threshold_min=100,
+                threshold_max=50000,
+            ),
+            "must_be_profitable": FilterConfig(
                 name="Minimum Total P/L ($)",
-                description="Must have made at least some profit",
-                is_hard_filter=False,  # Disabled: leaderboard already filters by P/L
-                enabled=False,  # Computed P/L from 90-day history is unreliable
-                threshold=100,
-                threshold_min=-10000,
-                threshold_max=10000,
+                description="Must have made at least some profit (from leaderboard)",
+                is_hard_filter=True,
+                enabled=False,  # Disabled by default, enabled via config
+                threshold=0,  # Will be overridden by config.min_profit
+                threshold_min=0,
+                threshold_max=1000000,
             ),
         },
 
@@ -735,6 +744,16 @@ def create_wide_net_profitability_config() -> ModeConfig:
                 weight=1.5,
                 pass_bonus=15,
                 fail_penalty=10,
+            ),
+            "max_off_high_watermark": FilterConfig(
+                name="Max Off High Watermark %",
+                description="How far below peak equity (lower = better). Uses unrealized losses vs realized gains.",
+                threshold=50,  # Max 50% below peak
+                threshold_min=5,
+                threshold_max=100,
+                weight=2.0,
+                pass_bonus=20,
+                fail_penalty=15,
             ),
             "largest_win_pct": FilterConfig(
                 name="Largest Win % of Total P/L",
@@ -1700,6 +1719,7 @@ class ScoringEngine:
                 "sharpe_ratio": pl_metrics.sharpe_ratio,
                 "sortino_ratio": pl_metrics.sortino_ratio,
                 "max_drawdown": pl_metrics.max_drawdown_pct * 100,
+                "max_off_high_watermark": getattr(pl_metrics, 'off_high_watermark_pct', 0) * 100,
                 "win_rate": pl_metrics.win_rate * 100,
                 "win_rate_at_long_odds": pl_metrics.win_rate * 100,  # Approximation
                 # Copytrade viability metrics
@@ -1748,6 +1768,8 @@ class ScoringEngine:
             "largest_win_pct",  # Lower concentration = better
             # Copytrade viability: lower concentration = more copyable
             "top_3_concentration", "top_5_concentration", "top_10_concentration",
+            "max_trades",  # HFT filter: fewer trades = better (not a bot)
+            "max_off_high_watermark",  # Lower = closer to peak equity
         ]
 
         if less_is_better:

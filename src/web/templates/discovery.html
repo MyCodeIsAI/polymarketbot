@@ -636,6 +636,26 @@
                         <option value="60">Under 60% (tolerant)</option>
                     </select>
                 </div>
+
+                <!-- Off High Watermark Filter -->
+                <div>
+                    <div class="flex items-center mb-2">
+                        <label class="text-sm text-gray-400">Max Off Peak %</label>
+                        <span class="tooltip-trigger ml-1">
+                            <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <div class="tooltip-content">How far below their peak equity. Accounts up $20K but down $80K in unrealized losses = 400% off peak. Filters out "technically profitable but underwater" accounts.</div>
+                        </span>
+                    </div>
+                    <select id="filter-off-peak" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white">
+                        <option value="100">Any (no limit)</option>
+                        <option value="5">Under 5% (at peak)</option>
+                        <option value="10">Under 10% (excellent)</option>
+                        <option value="25">Under 25% (healthy)</option>
+                        <option value="50" selected>Under 50% (moderate)</option>
+                    </select>
+                </div>
             </div>
 
             <!-- Filter Options - Row 3: Systematic Trader Signals -->
@@ -1591,6 +1611,8 @@
                         unique_markets: pattern.unique_markets_traded || 0,
                         max_drawdown_pct: pl.max_drawdown_pct || 0,
                         avg_drawdown_pct: pl.avg_drawdown_pct || 0,
+                        off_high_watermark_pct: pl.off_high_watermark_pct || 0,
+                        unrealized_pnl: pl.unrealized_pnl || 0,
                         win_rate: winRate,
                         profit_factor: pl.profit_factor || 0,
                         sharpe_ratio: pl.sharpe_ratio || 0,
@@ -1826,7 +1848,7 @@
         // Filter change listeners - update preview
         // Select dropdowns (all select-based filters)
         ['filter-activity', 'filter-max-avg-position', 'filter-trades-per-week', 'filter-max-drawdown',
-         'filter-win-rate', 'filter-min-profit-factor', 'filter-min-sharpe', 'filter-max-top3-concentration'].forEach(id => {
+         'filter-off-peak', 'filter-win-rate', 'filter-min-profit-factor', 'filter-min-sharpe', 'filter-max-top3-concentration'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('change', updateFilterPreview);
         });
@@ -2632,6 +2654,7 @@
 
             // New systematic trader filters
             const maxDrawdown = parseFloat(document.getElementById('filter-max-drawdown').value) || 100;
+            const maxOffPeak = parseFloat(document.getElementById('filter-off-peak').value) || 100;
             const winRateRange = document.getElementById('filter-win-rate').value;
             const minProfitFactor = parseFloat(document.getElementById('filter-min-profit-factor').value) || 0;
             const minSharpe = parseFloat(document.getElementById('filter-min-sharpe').value) || 0;
@@ -2682,6 +2705,12 @@
                 if (maxDrawdown < 100) {
                     const drawdown = (account.max_drawdown_pct || account.max_drawdown || 0) * 100;
                     if (drawdown > maxDrawdown) return false;
+                }
+
+                // Off high watermark filter (how far below peak)
+                if (maxOffPeak < 100) {
+                    const offPeak = (account.off_high_watermark_pct || 0) * 100;
+                    if (offPeak > maxOffPeak) return false;
                 }
 
                 // Win rate filter
@@ -2761,6 +2790,7 @@
             const maxProfileViews = document.getElementById('filter-max-profile-views').value;
             // New systematic trader filters
             const maxDrawdown = document.getElementById('filter-max-drawdown').value;
+            const maxOffPeak = document.getElementById('filter-off-peak').value;
             const winRate = document.getElementById('filter-win-rate').value;
             const minProfitFactor = document.getElementById('filter-min-profit-factor').value;
             const minSharpe = document.getElementById('filter-min-sharpe').value;
@@ -2777,6 +2807,7 @@
             if (maxProfileViews) filters.push(`≤${parseInt(maxProfileViews).toLocaleString()} views`);
             // New systematic trader filter displays
             if (maxDrawdown !== '100') filters.push(`DD ≤${maxDrawdown}%`);
+            if (maxOffPeak !== '100') filters.push(`OffPeak ≤${maxOffPeak}%`);
             if (winRate !== 'any') filters.push(`WR ${winRate}%`);
             if (minProfitFactor > 0) filters.push(`PF ≥${minProfitFactor}`);
             if (minSharpe > 0) filters.push(`Sharpe ≥${minSharpe}`);

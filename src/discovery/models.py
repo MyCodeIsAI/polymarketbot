@@ -165,6 +165,11 @@ class PLCurveMetrics:
     simulated_50pct_capture_median: float = 0.0  # Median P/L capturing 50% of trades
     simulated_25pct_capture_median: float = 0.0  # Median P/L capturing 25% of trades
 
+    # High watermark drawdown (robust measure of being "down from peak")
+    # Uses leaderboard realized P/L as proxy for peak, compared to unrealized losses
+    off_high_watermark_pct: float = 0.0  # How far below peak (0.0 = at peak, 0.5 = 50% down)
+    unrealized_pnl: float = 0.0  # Current total unrealized P/L from open positions
+
 
 @dataclass
 class TradingPatternMetrics:

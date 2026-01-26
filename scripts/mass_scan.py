@@ -110,17 +110,26 @@ async def fetch_all_profile_views(
 
     return results
 
-# Configuration
-MIN_PNL = 20000        # Minimum P/L: $20,000
-MAX_PNL = 100000       # Maximum P/L: $100,000
-MIN_TRADES = 75        # Minimum trades
-MAX_TRADES = 3000      # Maximum trades
-MAX_CANDIDATES = 15000 # Max accounts to pull from leaderboard
-TRADES_TO_SCRAPE = 500 # Trades to analyze per account
+# Configuration - Override with --test for light scan
+TEST_MODE = "--test" in sys.argv or "-t" in sys.argv
+
+MIN_PNL = 10000        # Minimum P/L: $10,000
+MAX_PNL = 100000000    # Maximum P/L: $100M (effectively unlimited)
+MIN_TRADES = 25        # Minimum trades
+MAX_TRADES = 5000      # Maximum trades
+MAX_CANDIDATES = 500 if TEST_MODE else 20000  # Max accounts to pull from leaderboard
+TRADES_TO_SCRAPE = 50  # Trades to analyze per account (for category detection)
+REQUIRE_RECENT_TRADE = True   # Must have traded in last N days
+RECENT_TRADE_DAYS = 30        # Days to consider "recent"
 
 # Output file
-OUTPUT_FILE = PROJECT_ROOT / "data" / "analyzed_accounts.json"
+OUTPUT_FILE = PROJECT_ROOT / "data" / (
+    "analyzed_accounts_TEST.json" if TEST_MODE else "analyzed_accounts.json"
+)
 CHECKPOINT_FILE = PROJECT_ROOT / "data" / "mass_scan_checkpoint.json"
+
+if TEST_MODE:
+    print("\n*** TEST MODE: Scanning only 50 accounts ***\n")
 
 
 def convert_decimals(obj):
@@ -246,6 +255,9 @@ def normalize_result(result: dict) -> dict:
         "max_drawdown_pct": max_drawdown_pct,
         "avg_drawdown_pct": avg_drawdown_pct,
         "max_drawdown_usd": total_pnl * max_drawdown_pct if max_drawdown_pct else 0,
+        # High watermark drawdown (compares realized P/L to unrealized losses)
+        "off_high_watermark_pct": pl.get("off_high_watermark_pct", 0),
+        "unrealized_pnl": pl.get("unrealized_pnl", 0),
 
         # Trade direction
         "buy_sell_ratio": pattern.get("buy_sell_ratio", 0.5),
@@ -393,6 +405,7 @@ async def run_mass_scan():
     config = ScanConfig(
         mode=DiscoveryMode.WIDE_NET_PROFITABILITY,
         max_candidates=MAX_CANDIDATES,
+        min_profit=MIN_PNL,  # Minimum P/L filter
         max_profit=MAX_PNL,
         analyze_top_n=TRADES_TO_SCRAPE,
         max_trades=MAX_TRADES,
@@ -402,6 +415,7 @@ async def run_mass_scan():
         max_phase3=MAX_CANDIDATES,  # Process all in phase 3
         persist_to_db=True,  # Enable checkpointing for resume capability
         checkpoint_interval=25,  # Save every 25 accounts
+        enable_categorization=True,  # Fetch market data for accurate category detection
     )
 
     # Progress tracking
@@ -475,14 +489,36 @@ async def run_mass_scan():
         print("\nWARNING: No results! Check scan configuration.")
         return []
 
+    # Debug: Show sample result structure
+    if results and TEST_MODE:
+        sample = results[0]
+        print(f"\n  DEBUG - Sample result keys: {list(sample.keys())[:15]}...")
+        print(f"  DEBUG - total_pnl: {sample.get('total_pnl')}")
+        print(f"  DEBUG - pl_metrics.total_realized_pnl: {(sample.get('pl_metrics') or {}).get('total_realized_pnl')}")
+        print(f"  DEBUG - pattern_metrics.days_since_last_trade: {(sample.get('pattern_metrics') or {}).get('days_since_last_trade')}")
+        print(f"  DEBUG - pattern_metrics.primary_category: {(sample.get('pattern_metrics') or {}).get('primary_category')}")
+
     # Filter by P/L range (leaderboard may not have exact range)
+    # total_pnl comes from leaderboard; fallback to pl_metrics.total_realized_pnl
     filtered_results = []
     for r in results:
-        pnl = float(r.get("total_pnl") or 0)
+        pnl = float(r.get("total_pnl") or (r.get("pl_metrics") or {}).get("total_realized_pnl") or 0)
         if MIN_PNL <= pnl <= MAX_PNL:
             filtered_results.append(r)
 
     print(f"  After P/L filter (${MIN_PNL:,}-${MAX_PNL:,}): {len(filtered_results):,} accounts")
+
+    # Filter by recent trade activity if required
+    if REQUIRE_RECENT_TRADE:
+        pre_recency = len(filtered_results)
+        recency_filtered = []
+        for r in filtered_results:
+            pattern = r.get("pattern_metrics") or {}
+            days_since_trade = pattern.get("days_since_last_trade", 999)
+            if days_since_trade <= RECENT_TRADE_DAYS:
+                recency_filtered.append(r)
+        filtered_results = recency_filtered
+        print(f"  After recency filter (traded in last {RECENT_TRADE_DAYS}d): {len(filtered_results):,} accounts (filtered {pre_recency - len(filtered_results):,})")
 
     # Normalize to analyzed_accounts format
     print("\nNormalizing results to analyzed_accounts format...")
@@ -573,5 +609,5 @@ if __name__ == "__main__":
     results = asyncio.run(run_mass_scan())
     print(f"\n{'=' * 70}")
     print(f"  Mass scan complete. {len(results):,} accounts saved.")
-    print(f"  Output: data/analyzed_accounts.json")
+    print(f"  Output: {OUTPUT_FILE}")
     print(f"{'=' * 70}\n")

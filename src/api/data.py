@@ -85,7 +85,8 @@ class Position:
             current_value=Decimal(str(data.get("currentValue", data.get("current_value", 0)))),
             initial_value=Decimal(str(data.get("initialValue", data.get("initial_value", 0)))),
             realized_pnl=Decimal(str(data.get("realizedPnl", data.get("realized_pnl", 0)))),
-            unrealized_pnl=Decimal(str(data.get("unrealizedPnl", data.get("unrealized_pnl", 0)))),
+            # API returns cashPnl for unrealized P/L, fallback to unrealizedPnl for compatibility
+            unrealized_pnl=Decimal(str(data.get("cashPnl", data.get("unrealizedPnl", data.get("unrealized_pnl", 0))))),
             market_slug=data.get("marketSlug", data.get("market_slug")),
             market_title=data.get("title", data.get("market_title")),
         )

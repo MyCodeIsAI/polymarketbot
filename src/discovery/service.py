@@ -58,16 +58,17 @@ logger = get_logger(__name__)
 
 
 # Leaderboard categories available from the API
+# OVERALL comes first to prioritize high P/L accounts
 LEADERBOARD_CATEGORIES = [
-    "WEATHER",
-    "ECONOMICS",
+    "OVERALL",   # Highest P/L accounts across all categories
+    "POLITICS",  # Major category
+    "SPORTS",    # Major category
+    "CRYPTO",    # Major category
+    "CULTURE",
     "TECH",
     "FINANCE",
-    "CRYPTO",
-    "POLITICS",
-    "SPORTS",
-    "CULTURE",
-    "OVERALL",
+    "ECONOMICS",
+    "WEATHER",   # Smallest category, lowest P/L typically
 ]
 
 
@@ -109,6 +110,7 @@ class ScanConfig:
     # Checkpointing
     checkpoint_interval: int = 50  # Save progress every N accounts
     persist_to_db: bool = True  # Store results in database
+    enable_categorization: bool = False  # Fetch market data for category detection (slower)
 
     # Resume support
     resume_from_scan_id: int = None  # Resume an existing scan
@@ -293,12 +295,12 @@ class LeaderboardClient(BaseAPIClient):
         entries = []
 
         # Fetch from multiple angles to maximize coverage
+        # Prioritize ALL time first to get lifetime top earners
         fetch_configs = [
-            ("WEEK", "PNL"),
-            ("MONTH", "PNL"),
-            ("ALL", "PNL"),
-            ("WEEK", "VOL"),  # Also get volume leaders
-            ("MONTH", "VOL"),
+            ("ALL", "PNL"),   # Lifetime P/L leaders first (highest absolute P/L)
+            ("MONTH", "PNL"),  # Monthly top earners
+            ("WEEK", "PNL"),   # Weekly top earners
+            ("ALL", "VOL"),    # High volume traders
         ]
 
         for time_period, order_by in fetch_configs:
@@ -771,11 +773,24 @@ class DiscoveryService:
             "min_composite_score": config.min_score_threshold,
         }
 
-        # Pass user's min_trades to the hard filter in scoring engine
+        # Pass user's filter thresholds to the hard filter in scoring engine
+        # NOTE: min_trades is applied ONLY in Phase 1 (quick_filter) - disabled for Phase 3
+        #       Phase 3 uses scraped trade count which may be lower than leaderboard total
+        # NOTE: max_trades applies in Phase 3 to filter HFT bots (scraped count still useful)
+        # NOTE: must_be_profitable is applied ONLY in Phase 1 (uses leaderboard P/L)
+        #       We don't enable it for Phase 3 scoring because it uses computed P/L which is unreliable
+        hard_filter_updates = {}
         if config.min_trades:
-            scoring_updates["hard_filters"] = {
-                "min_trades": {"threshold": config.min_trades}
-            }
+            # DISABLED for Phase 3 - already checked in Phase 1 with leaderboard data
+            hard_filter_updates["min_trades"] = {"threshold": config.min_trades, "enabled": False}
+        if config.max_trades:
+            hard_filter_updates["max_trades"] = {"threshold": config.max_trades, "enabled": True}
+        # NOTE: must_be_profitable threshold is set but NOT enabled for scoring
+        # Phase 1 quick_filter uses leaderboard P/L (authoritative), Phase 3 scoring would use computed P/L (unreliable)
+        if config.min_profit:
+            hard_filter_updates["must_be_profitable"] = {"threshold": config.min_profit, "enabled": False}
+        if hard_filter_updates:
+            scoring_updates["hard_filters"] = hard_filter_updates
 
         self._analyzer.scoring_engine.update_config(scoring_updates)
 
@@ -1003,6 +1018,7 @@ class DiscoveryService:
                 max_concurrent=3,
                 progress_callback=phase3_progress_cb,
                 max_trades=config.analyze_top_n,
+                enable_categorization=config.enable_categorization,
             )
 
             # Persist deep analysis results
@@ -1070,6 +1086,22 @@ class DiscoveryService:
                             result.total_pnl = account.total_pnl
                     except Exception:
                         pass  # Continue without leaderboard P/L if DB lookup fails
+
+            # Calculate off_high_watermark_pct for each result
+            # Uses leaderboard P/L as high watermark proxy, compared to unrealized losses
+            for result in passed_results:
+                if result.pl_metrics and result.total_pnl:
+                    realized_pnl = float(result.total_pnl)
+                    unrealized_pnl = getattr(result.pl_metrics, 'unrealized_pnl', 0) or 0
+
+                    if realized_pnl > 0 and unrealized_pnl < 0:
+                        # Account has realized gains but open positions are losing money
+                        # off_high_watermark = how much they've lost from peak as percentage
+                        off_pct = min(1.0, abs(unrealized_pnl) / realized_pnl)
+                        result.pl_metrics.off_high_watermark_pct = off_pct
+                    else:
+                        # Either at peak (unrealized >= 0) or no realized gains to compare
+                        result.pl_metrics.off_high_watermark_pct = 0.0
 
             # Convert to dict format for API response
             for result in passed_results:
