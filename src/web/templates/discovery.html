@@ -1774,15 +1774,15 @@
             e.target.value = '';
         });
 
-        // Fetch counts for dropdown on page load
+        // Fetch counts for dropdown on page load (uses fast meta endpoint)
         (async function updatePreloadedCounts() {
             try {
                 const select = document.getElementById('preloaded-list-select');
 
-                // Fetch profitable traders count
-                const profitableResp = await fetch('/api/discovery/analyzed-accounts?limit=1');
+                // Fetch profitable traders count from fast meta endpoint
+                const profitableResp = await fetch('/api/discovery/analyzed-accounts/meta');
                 const profitableData = await profitableResp.json();
-                const profitableCount = profitableData.total_analyzed || profitableData.total || 0;
+                const profitableCount = profitableData.total_analyzed || 0;
 
                 // Fetch insider suspects count
                 const insiderResp = await fetch('/api/discovery/insider-suspects?limit=1');

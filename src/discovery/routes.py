@@ -37,6 +37,51 @@ router = APIRouter(prefix="/discovery", tags=["discovery"])
 
 
 # =============================================================================
+# Analyzed Accounts Cache (avoid reloading 500MB+ file on each request)
+# =============================================================================
+_analyzed_accounts_cache: Optional[Dict[str, Any]] = None
+_analyzed_accounts_mtime: float = 0
+
+
+def _get_analyzed_accounts_cached() -> Dict[str, Any]:
+    """Load analyzed accounts with caching to avoid repeated disk reads."""
+    global _analyzed_accounts_cache, _analyzed_accounts_mtime
+    import json
+
+    data_file = DATA_DIR / "analyzed_accounts.json"
+    if not data_file.exists():
+        return {"accounts": [], "total_analyzed": 0}
+
+    # Check if file has changed
+    current_mtime = data_file.stat().st_mtime
+    if _analyzed_accounts_cache is None or current_mtime != _analyzed_accounts_mtime:
+        logger.info("Loading analyzed accounts from disk (this may take a moment)...")
+        with open(data_file) as f:
+            _analyzed_accounts_cache = json.load(f)
+        _analyzed_accounts_mtime = current_mtime
+        logger.info(f"Loaded {len(_analyzed_accounts_cache.get('accounts', []))} accounts into cache")
+
+    return _analyzed_accounts_cache
+
+
+def _get_analyzed_accounts_meta() -> Dict[str, Any]:
+    """Get just metadata (counts) without loading the full file."""
+    import json
+
+    meta_file = DATA_DIR / "analyzed_accounts_meta.json"
+    if meta_file.exists():
+        with open(meta_file) as f:
+            return json.load(f)
+
+    # Fallback: load full file (slow)
+    data = _get_analyzed_accounts_cached()
+    return {
+        "total_analyzed": data.get("total_analyzed", len(data.get("accounts", []))),
+        "generated_at": data.get("generated_at"),
+    }
+
+
+# =============================================================================
 # Profile Views Fetcher
 # =============================================================================
 
@@ -1050,6 +1095,18 @@ async def get_scan_efficiency_stats():
     return service.get_scan_stats()
 
 
+@router.get("/analyzed-accounts/meta")
+async def get_analyzed_accounts_meta():
+    """Get just metadata (counts) for analyzed accounts - fast, no heavy file load."""
+    meta = _get_analyzed_accounts_meta()
+    return {
+        "total_analyzed": meta.get("total_analyzed", 0),
+        "generated_at": meta.get("generated_at"),
+        "active_count": meta.get("active_count", 0),
+        "quality_count": meta.get("quality_count", 0),
+    }
+
+
 @router.get("/analyzed-accounts")
 async def get_analyzed_accounts(
     min_score: float = Query(0, ge=0, le=100),
@@ -1078,9 +1135,6 @@ async def get_analyzed_accounts(
     - max_profile_views: Exclude accounts with too many profile views (find hidden gems)
     - min_profile_views: Only include accounts with minimum profile visibility
     """
-    import json
-    from pathlib import Path
-
     data_file = DATA_DIR / "analyzed_accounts.json"
 
     if not data_file.exists():
@@ -1090,9 +1144,8 @@ async def get_analyzed_accounts(
             "accounts": [],
         }
 
-    with open(data_file) as f:
-        data = json.load(f)
-
+    # Use cached data to avoid reloading 500MB+ file on each request
+    data = _get_analyzed_accounts_cached()
     accounts = data.get("accounts", [])
 
     # Ensure wallet_address is present (some older data only has "wallet")
