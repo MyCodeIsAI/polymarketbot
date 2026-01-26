@@ -517,9 +517,9 @@ class RealTimeMonitor:
         if any(kw in combined for kw in ["election", "vote", "ballot", "president", "congress", "senate"]):
             return MarketCategory.ELECTION
         if any(kw in combined for kw in ["war", "military", "conflict", "attack", "invasion", "troops"]):
-            return MarketCategory.MILITARY_CONFLICT
+            return MarketCategory.MILITARY
         if any(kw in combined for kw in ["fed", "rate", "regulation", "policy", "law", "bill", "government"]):
-            return MarketCategory.POLICY_REGULATORY
+            return MarketCategory.GOVERNMENT_POLICY
         if any(kw in combined for kw in ["earnings", "stock", "company", "ceo", "merger", "acquisition", "ipo"]):
             return MarketCategory.CORPORATE
         if any(kw in combined for kw in ["bitcoin", "ethereum", "crypto", "token", "defi", "nft"]):
