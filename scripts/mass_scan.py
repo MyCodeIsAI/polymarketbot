@@ -167,6 +167,8 @@ def normalize_result(result: dict) -> dict:
     account_age_days = pattern.get("account_age_days", 0)
     active_days = pattern.get("active_days", 0)
     days_since_last_trade = pattern.get("days_since_last_trade", 999)
+    trades_last_7d = pattern.get("trades_last_7d", 0)
+    trades_last_30d = pattern.get("trades_last_30d", 0)
     trades_per_day = pattern.get("trades_per_day_avg", 0)
 
     # Position sizes - note the _usd suffix in actual field names
@@ -238,7 +240,9 @@ def normalize_result(result: dict) -> dict:
         "account_age_days": account_age_days,
         "active_days": active_days,
         "activity_recency_days": days_since_last_trade,
-        "is_currently_active": days_since_last_trade <= 7,
+        "trades_last_7d": trades_last_7d,
+        "trades_last_30d": trades_last_30d,
+        "is_currently_active": trades_last_7d > 0 or days_since_last_trade <= 7,
 
         # Win/loss stats (market-level when available, trade-level fallback)
         "win_rate": win_rate,

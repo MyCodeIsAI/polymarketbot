@@ -1521,6 +1521,13 @@ class AccountAnalyzer:
         # Days since last trade (activity recency)
         days_since_last = (datetime.utcnow() - last_trade).days
 
+        # Trades in last 7 and 30 days
+        now = datetime.utcnow()
+        seven_days_ago = now - timedelta(days=7)
+        thirty_days_ago = now - timedelta(days=30)
+        trades_last_7d = sum(1 for t in trades if t.timestamp >= seven_days_ago)
+        trades_last_30d = sum(1 for t in trades if t.timestamp >= thirty_days_ago)
+
         # Buy/sell ratio
         buy_count = sum(1 for t in trades if t.side == TradeSide.BUY)
         buy_ratio = buy_count / total_trades if total_trades > 0 else 0.5
@@ -1550,6 +1557,8 @@ class AccountAnalyzer:
             avg_hold_time_hours=0.0,
             pct_trades_near_expiry=0.0,
             days_since_last_trade=days_since_last,
+            trades_last_7d=trades_last_7d,
+            trades_last_30d=trades_last_30d,
             buy_sell_ratio=buy_ratio,
             primary_category=primary_cat,
             category_concentration=cat_concentration,
@@ -1764,6 +1773,8 @@ class AccountAnalyzer:
             avg_hold_time_hours=0.0,
             pct_trades_near_expiry=0.0,
             days_since_last_trade=999,
+            trades_last_7d=0,
+            trades_last_30d=0,
             buy_sell_ratio=0.5,
             primary_category="Diversified",
             category_concentration=0.0,

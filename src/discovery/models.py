@@ -204,6 +204,8 @@ class TradingPatternMetrics:
 
     # Activity recency and trade direction
     days_since_last_trade: int = 0
+    trades_last_7d: int = 0  # Number of trades in the last 7 days
+    trades_last_30d: int = 0  # Number of trades in the last 30 days
     buy_sell_ratio: float = 0.5  # Ratio of buys to total trades
 
     # Primary category classification
