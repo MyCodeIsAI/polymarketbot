@@ -1363,11 +1363,12 @@ class AccountAnalyzer:
         profit_factor = float(total_wins / total_losses) if total_losses > 0 else float("inf")
 
         # Concentration (extended for copytrade viability analysis)
+        # Use total_wins (gross profit) as denominator - percentage of winning profit from top N wins
         sorted_wins = sorted(wins, reverse=True)
-        largest_win_pct = float(sorted_wins[0] / cumulative_pnl) if sorted_wins and cumulative_pnl > 0 else 0.0
-        top_3_pct = float(sum(sorted_wins[:3]) / cumulative_pnl) if len(sorted_wins) >= 3 and cumulative_pnl > 0 else largest_win_pct
-        top_5_pct = float(sum(sorted_wins[:5]) / cumulative_pnl) if len(sorted_wins) >= 5 and cumulative_pnl > 0 else top_3_pct
-        top_10_pct = float(sum(sorted_wins[:10]) / cumulative_pnl) if len(sorted_wins) >= 10 and cumulative_pnl > 0 else top_5_pct
+        largest_win_pct = float(sorted_wins[0] / total_wins) if sorted_wins and total_wins > 0 else 0.0
+        top_3_pct = float(sum(sorted_wins[:3]) / total_wins) if len(sorted_wins) >= 3 and total_wins > 0 else largest_win_pct
+        top_5_pct = float(sum(sorted_wins[:5]) / total_wins) if len(sorted_wins) >= 5 and total_wins > 0 else top_3_pct
+        top_10_pct = float(sum(sorted_wins[:10]) / total_wins) if len(sorted_wins) >= 10 and total_wins > 0 else top_5_pct
 
         # Market-level P/L analysis for copytrade viability
         # Track P/L per market to compute market win rate
