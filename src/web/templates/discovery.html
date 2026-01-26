@@ -2668,7 +2668,7 @@
                 // Activity filter (last traded X days ago)
                 if (activityFilter !== 'any') {
                     const maxDays = parseInt(activityFilter);
-                    const recency = account.activity_recency_days || account.days_since_last_trade || 999;
+                    const recency = account.activity_recency_days ?? account.days_since_last_trade ?? 999;
                     if (recency > maxDays) return false;
                 }
 
@@ -2872,8 +2872,8 @@
                         bVal = b.unique_markets || 0;
                         break;
                     case 'activity_recency_days':
-                        aVal = a.activity_recency_days || 999;
-                        bVal = b.activity_recency_days || 999;
+                        aVal = a.activity_recency_days ?? 999;
+                        bVal = b.activity_recency_days ?? 999;
                         return sortDirection === 'desc' ? aVal - bVal : bVal - aVal;
                     case 'profit_factor':
                         aVal = a.profit_factor || 1;
@@ -2948,7 +2948,7 @@
             const maxDrawdown = account.max_drawdown_pct || account.estimated_drawdown_pct || 0;
             const trades = account.num_trades || 0;
             const trades7d = account.trades_last_7d || 0;
-            const recencyDays = account.activity_recency_days || 999;
+            const recencyDays = account.activity_recency_days ?? 999;
 
             // Score color class
             let scoreClass = 'score-low';
@@ -3546,7 +3546,7 @@
                 a.total_pnl || 0,
                 a.num_trades || 0,
                 a.max_drawdown_pct || a.estimated_drawdown_pct || 0,
-                a.activity_recency_days || 999,
+                a.activity_recency_days ?? 999,
                 a.trades_last_7d || 0
             ]);
 
