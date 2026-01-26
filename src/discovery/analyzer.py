@@ -39,14 +39,14 @@ logger = get_logger(__name__)
 # =============================================================================
 
 CATEGORY_KEYWORDS = {
-    "politics": ["president", "election", "trump", "biden", "congress", "senate", "governor", "vote", "primary", "democrat", "republican"],
-    "sports": ["nfl", "nba", "mlb", "nhl", "soccer", "football", "basketball", "baseball", "ufc", "boxing", "tennis", "golf", "formula"],
-    "crypto": ["bitcoin", "btc", "ethereum", "eth", "crypto", "token", "coin", "defi", "solana", "dogecoin"],
-    "weather": ["temperature", "weather", "snow", "rain", "hurricane", "storm", "heat", "cold", "climate", "tornado", "flood"],
-    "economics": ["fed", "rate", "inflation", "gdp", "unemployment", "economy", "recession", "cpi", "fomc", "interest", "jobs"],
-    "finance": ["stock", "market", "nasdaq", "s&p", "dow", "price", "trading", "earnings", "ipo"],
-    "tech": ["ai", "openai", "google", "apple", "microsoft", "tesla", "tech", "software", "chatgpt", "meta", "nvidia"],
-    "culture": ["oscar", "grammy", "movie", "music", "celebrity", "entertainment", "award", "film"],
+    "politics": ["president", "election", "trump", "biden", "congress", "senate", "governor", "vote", "primary", "democrat", "republican", "impeach", "veto", "legislation"],
+    "sports": ["nfl", "nba", "mlb", "nhl", "soccer", "football", "basketball", "baseball", "ufc", "boxing", "tennis", "golf", "formula", "win on", "saudi", "club", "league", "championship", "playoffs", "super bowl", "world cup", "premier league", "la liga", "serie a", "bundesliga", "champions league"],
+    "crypto": ["bitcoin", "btc", "ethereum", "eth", "crypto", "token", "coin", "defi", "solana", "dogecoin", "gold or eth", "memecoin", "nft", "blockchain"],
+    "weather": ["temperature", "weather", "snow", "rain", "hurricane", "storm", "heat", "cold", "climate", "tornado", "flood", "drought", "wildfire"],
+    "economics": ["fed", "rate", "inflation", "gdp", "unemployment", "economy", "recession", "cpi", "fomc", "interest", "jobs", "tariff"],
+    "finance": ["stock", "market", "nasdaq", "s&p", "dow", "price", "trading", "earnings", "ipo", "gold price", "oil price", "treasury"],
+    "tech": ["ai", "openai", "google", "apple", "microsoft", "tesla", "tech", "software", "chatgpt", "meta", "nvidia", "spacex", "starship"],
+    "culture": ["oscar", "grammy", "movie", "music", "celebrity", "entertainment", "award", "film", "emmys", "golden globe"],
 }
 
 MAINSTREAM_CATEGORIES = {"politics", "sports"}
@@ -1167,7 +1167,14 @@ class AccountAnalyzer:
                 market_title = f"Market {activity.condition_id[:8]}..."
                 category = "other"
             else:
-                market_title = await self._get_market_title(activity.condition_id)
+                # Use market_title from Activity (Data API) - much more reliable than Gamma API
+                # The Data API includes market title directly in activity responses
+                market_title = activity.market_title
+                if not market_title and activity.condition_id:
+                    # Fallback to Gamma API only if Data API didn't provide title
+                    market_title = await self._get_market_title(activity.condition_id)
+                if not market_title:
+                    market_title = f"Market {(activity.condition_id or 'unknown')[:8]}..."
                 category = self._categorize_market(market_title)
 
             # Determine side and price based on activity type

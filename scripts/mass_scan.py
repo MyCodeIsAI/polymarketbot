@@ -118,7 +118,9 @@ MAX_PNL = 100000000    # Maximum P/L: $100M (effectively unlimited)
 MIN_TRADES = 25        # Minimum trades
 MAX_TRADES = 5000      # Maximum trades
 MAX_CANDIDATES = 500 if TEST_MODE else 20000  # Max accounts to pull from leaderboard
-TRADES_TO_SCRAPE = 50  # Trades to analyze per account (for category detection)
+# Fetch ALL trades for accurate category detection and metrics
+# Must match MAX_TRADES to ensure complete history for filtered accounts
+TRADES_TO_SCRAPE = MAX_TRADES
 REQUIRE_RECENT_TRADE = True   # Must have traded in last N days
 RECENT_TRADE_DAYS = 30        # Days to consider "recent"
 
