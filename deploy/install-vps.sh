@@ -76,6 +76,26 @@ else
 fi
 
 # ============================================================================
+# STEP 2b: Decompress pre-built data files
+# ============================================================================
+echo -e "\n${GREEN}[3b/8]${NC} Preparing data files..."
+
+if [ -d "$INSTALL_DIR/data" ]; then
+    cd "$INSTALL_DIR/data"
+    for gz_file in *.json.gz; do
+        if [ -f "$gz_file" ]; then
+            json_file="${gz_file%.gz}"
+            if [ ! -f "$json_file" ]; then
+                echo "  Decompressing $gz_file..."
+                gunzip -k "$gz_file"
+            fi
+        fi
+    done
+    cd "$INSTALL_DIR"
+    echo "  Data files ready"
+fi
+
+# ============================================================================
 # STEP 3: Create virtual environment and install dependencies
 # ============================================================================
 echo -e "\n${GREEN}[4/8]${NC} Setting up Python environment..."

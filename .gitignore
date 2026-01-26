@@ -100,3 +100,10 @@ data/withdrawal_destinations.json
 data/cluster_report.txt
 
 # NOTE: data/sybil_defaults.json IS committed (stripped 1.2MB defaults for new deployments)
+
+# Large uncompressed data files (generated from .json.gz during install)
+data/analyzed_accounts.json
+data/analyzed_accounts_enriched.json
+data/analyzed_accounts_TEST.json
+
+# NOTE: data/*.json.gz files ARE committed (compressed cache for quick-load on new VPS)
