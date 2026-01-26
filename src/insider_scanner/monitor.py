@@ -408,7 +408,12 @@ class RealTimeMonitor:
         return connected
 
     async def _get_high_risk_token_ids(self) -> list[str]:
-        """Get token IDs for high-risk markets (ending within 48 hours).
+        """Get token IDs for ALL active markets to monitor.
+
+        Removed 48-hour restriction - insiders often position weeks/months
+        in advance when odds are most favorable. We now monitor all open
+        markets and rely on scoring (account age, bet size, odds, category)
+        to identify suspicious activity.
 
         Also caches market info (end time, category) for scoring.
 
@@ -418,16 +423,17 @@ class RealTimeMonitor:
         import httpx
 
         token_ids = []
+        high_risk_tokens = []  # Prioritize high-risk categories
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                # Get active events
+                # Get active events - increased limit to catch more markets
                 response = await client.get(
                     f"{self.GAMMA_API_BASE}/events",
                     params={
                         "active": "true",
                         "closed": "false",
-                        "limit": 50,
+                        "limit": 200,  # Increased from 50
                     }
                 )
 
@@ -446,17 +452,30 @@ class RealTimeMonitor:
                         end_date = datetime.fromisoformat(end_date_str.replace("Z", ""))
                         hours_until_end = (end_date - now).total_seconds() / 3600
 
-                        # Focus on events ending in next 48 hours
-                        if 0 < hours_until_end < 48:
+                        # Monitor ALL open markets (removed 48-hour restriction)
+                        if hours_until_end > 0:
                             # Detect market category from tags/title
                             category = self._detect_category(event)
+
+                            # High-risk categories get priority
+                            is_high_risk = category in (
+                                MarketCategory.MILITARY,
+                                MarketCategory.GOVERNMENT_POLICY,
+                                MarketCategory.ELECTION,
+                                MarketCategory.CORPORATE,
+                            )
 
                             # Get token IDs from markets and cache info
                             markets = event.get("markets", [])
                             for market in markets:
                                 market_id = market.get("conditionId", "")
                                 clob_tokens = market.get("clobTokenIds", [])
-                                token_ids.extend(clob_tokens)
+
+                                # Prioritize high-risk categories
+                                if is_high_risk:
+                                    high_risk_tokens.extend(clob_tokens)
+                                else:
+                                    token_ids.extend(clob_tokens)
 
                                 # Cache market info for scoring
                                 if market_id:
@@ -474,10 +493,11 @@ class RealTimeMonitor:
         except Exception as e:
             logger.debug("get_token_ids_error", error=str(e))
 
-        logger.info("market_info_cached", markets=len(self._market_info))
+        logger.info("market_info_cached", markets=len(self._market_info), high_risk=len(high_risk_tokens))
 
-        # Limit to reasonable number
-        return token_ids[:100]
+        # Prioritize high-risk tokens, then fill with others (increased limit)
+        combined = high_risk_tokens + token_ids
+        return combined[:500]  # Increased from 100 to monitor more markets
 
     def _detect_category(self, event: dict) -> Optional[MarketCategory]:
         """Detect market category from event data.
