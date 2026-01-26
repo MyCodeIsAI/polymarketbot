@@ -1487,8 +1487,10 @@ class AccountAnalyzer:
         median_odds = Decimal(str(statistics.median(prices))) if prices else Decimal("0.5")
 
         total_trades = len(trades)
-        first_trade = trades[0].timestamp
-        last_trade = trades[-1].timestamp
+        # Use min/max to correctly identify first/last trade regardless of API sort order
+        timestamps = [t.timestamp for t in trades]
+        first_trade = min(timestamps)
+        last_trade = max(timestamps)
         days_span = max(1, (last_trade - first_trade).days)
         trades_per_day = total_trades / days_span
         account_age = (datetime.utcnow() - first_trade).days
@@ -1588,7 +1590,8 @@ class AccountAnalyzer:
         if not trades:
             return self._empty_insider_signals()
 
-        first_trade = trades[0].timestamp
+        # Use min to correctly identify first trade regardless of API sort order
+        first_trade = min(t.timestamp for t in trades)
         account_age = (datetime.utcnow() - first_trade).days
 
         large_unlikely_bets = []

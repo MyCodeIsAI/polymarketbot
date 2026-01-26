@@ -318,12 +318,23 @@ class GammaAPIClient(BaseAPIClient):
 
         Returns:
             Market object or None if not found
+
+        Note:
+            The Gamma API has a bug where it returns a default market (typically
+            the oldest one) when a condition ID is not found, instead of 404/empty.
+            We verify the returned market's condition_id matches to avoid this.
         """
         # Query by conditionId parameter (not path) since the API expects numeric IDs in path
         response = await self.get("/markets", params={"conditionId": condition_id, "limit": 1})
         data = response.data if isinstance(response.data, list) else response.data.get("markets", [])
         if data:
-            return Market.from_api(data[0])
+            market = Market.from_api(data[0])
+            # CRITICAL: Verify condition ID matches to avoid Gamma API's fallback behavior
+            # The API returns a default market instead of 404 when condition ID not found
+            if market.condition_id.lower() == condition_id.lower():
+                return market
+            # Condition ID mismatch - API returned wrong market
+            return None
         return None
 
     async def get_market_by_slug(self, slug: str) -> Optional[Market]:
