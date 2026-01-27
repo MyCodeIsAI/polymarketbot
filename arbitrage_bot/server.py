@@ -136,6 +136,20 @@ class Config:
     # MAX_API_ERRORS_PER_HOUR = 10    # Lower tolerance
     # ==========================================================================
 
+    # ==========================================================================
+    # FEES - Polymarket 15-minute market taker fees
+    # ==========================================================================
+    # Fee structure for 15-min crypto markets (Jan 2025+):
+    # - Fees scale with probability: highest at 50%, drops toward 0%/100%
+    # - At 50% price: ~3% fee
+    # - At 25% price: ~1.5% fee (estimated)
+    # - At 10% price: ~0.5% fee (estimated)
+    # Fees fund the Maker Rebates Program
+    ENABLE_FEE_SIMULATION: bool = True
+    MAX_TAKER_FEE_PCT: float = 3.0   # Fee at 50% probability (peak)
+    # Fee formula: fee_pct = MAX_TAKER_FEE_PCT * (1 - abs(price - 0.5) * 4)
+    # This creates a curve that peaks at 0.5 and drops to ~0 at 0/1
+
     # Paper trading
     STARTING_BALANCE: float = 200.0
     TRADE_SIZE_BASE: float = 15.0
@@ -743,6 +757,7 @@ class PaperAccount:
     positions: Dict[str, Position] = field(default_factory=dict)
     resolved_positions: List[ResolvedPosition] = field(default_factory=list)
     order_attempts: List[OrderAttempt] = field(default_factory=list)
+    total_fees_paid: float = 0.0  # Track total taker fees
 
     @property
     def open_exposure(self) -> float:
@@ -754,13 +769,18 @@ class PaperAccount:
 
     @property
     def realized_pl(self) -> float:
-        """Total realized P/L from resolved positions."""
+        """Total realized P/L from resolved positions (after fees)."""
         return sum(rp.realized_pl for rp in self.resolved_positions)
 
     @property
     def total_payout(self) -> float:
         """Total payout received from resolved positions."""
         return sum(rp.payout for rp in self.resolved_positions)
+
+    @property
+    def net_pl_after_fees(self) -> float:
+        """Net P/L after deducting all fees."""
+        return self.realized_pl - self.total_fees_paid
 
     def to_dict(self) -> dict:
         return {
@@ -770,6 +790,8 @@ class PaperAccount:
             "open_positions": self.open_positions_count,
             "realized_pl": round(self.realized_pl, 2),
             "total_payout": round(self.total_payout, 2),
+            "total_fees_paid": round(self.total_fees_paid, 2),
+            "net_pl_after_fees": round(self.net_pl_after_fees, 2),
             "resolved_count": len(self.resolved_positions),
             "total_order_attempts": len(self.order_attempts),
             "positions": {k: v.to_dict() for k, v in self.positions.items()},
@@ -1256,6 +1278,38 @@ def calculate_trade_size(price: float) -> float:
         return CONFIG.TRADE_SIZE_BASE * 0.5
 
 
+def calculate_taker_fee(price: float, trade_size_usd: float) -> float:
+    """Calculate Polymarket taker fee for 15-minute markets.
+
+    Fee structure:
+    - Peaks at 50% probability (~3%)
+    - Drops toward 0% as price approaches 0 or 1
+    - Formula creates a parabolic curve centered at 0.5
+
+    Args:
+        price: The trade price (0-1)
+        trade_size_usd: The trade size in USD
+
+    Returns:
+        Fee amount in USD
+    """
+    if not CONFIG.ENABLE_FEE_SIMULATION:
+        return 0.0
+
+    # Parabolic fee curve: peaks at 0.5, drops to 0 at extremes
+    # distance_from_center: 0 at price=0.5, 0.5 at price=0 or 1
+    distance_from_center = abs(price - 0.5)
+
+    # fee_multiplier: 1.0 at center (0.5), 0.0 at extremes (0 or 1)
+    fee_multiplier = max(0, 1 - (distance_from_center * 2))
+
+    # Calculate fee percentage and amount
+    fee_pct = CONFIG.MAX_TAKER_FEE_PCT * fee_multiplier / 100
+    fee_amount = trade_size_usd * fee_pct
+
+    return fee_amount
+
+
 def check_circuit_breakers() -> tuple:
     """Check all circuit breakers. Returns (should_halt, reason).
 
@@ -1670,13 +1724,18 @@ async def execute_signal(
         position.down_cost += trade_size_usd
     position.trades_count += 1
 
+    # Calculate and deduct taker fee
+    fee = calculate_taker_fee(price, trade_size_usd)
     STATE.account.balance -= trade_size_usd
+    STATE.account.balance -= fee
+    STATE.account.total_fees_paid += fee
 
+    fee_info = f" | Fee: ${fee:.2f}" if fee > 0 else ""
     logger.info(
         f"ORDER: {outcome} @ ${price:.3f} | "
         f"E2E: {e2e_ms:.1f}ms | "
         f"Submit: {result['submission_ms']:.1f}ms | "
-        f"{'OK' if result['success'] else result.get('error_message', 'Failed')[:30]}"
+        f"{'OK' if result['success'] else result.get('error_message', 'Failed')[:30]}{fee_info}"
     )
 
 
