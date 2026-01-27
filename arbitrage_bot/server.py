@@ -101,7 +101,7 @@ class Config:
     # Position limits - scaled for small account ($200-500)
     # Verified: They avg $2,365/market, we scale down ~10x
     MAX_POSITION_PER_MARKET: float = 250.0    # ~10% of their median ($1,048)
-    MAX_TOTAL_EXPOSURE: float = 500.0         # For $200-500 account
+    MAX_TOTAL_EXPOSURE: float = 800.0         # Allow overlap between 15min windows
     MAX_CONCURRENT_MARKETS: int = 4           # Focus on fewer markets with small capital
 
     # Position sizing by price (mirrors their pattern)
