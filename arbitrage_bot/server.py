@@ -63,38 +63,53 @@ class Config:
     API_SECRET: str = ""
     PRIVATE_KEY: str = ""  # Wallet private key for signing
 
-    # Entry thresholds (from wallet analysis of profitable accounts)
-    # PAIR_ACCUMULATION strategy: Buy cheap sides, then complete pairs
-    AGGRESSIVE_BUY_THRESHOLD: float = 0.30  # Always buy below this (44% of their buys)
-    STANDARD_BUY_THRESHOLD: float = 0.40    # Buy if pair cost is good
+    # ==========================================================================
+    # ENTRY THRESHOLDS - Verified from 49,267 trades (account 0x93c22116)
+    # ==========================================================================
+    # Strategy: Buy at ANY price when opportunity exists, accumulate both sides
+    # Verified: 39% under $0.30, 49% under $0.40, 19% over $0.70
 
-    # PAIR COMPLETION thresholds - buy other side to complete pair even if expensive
-    # From analysis: they buy at $0.57-$0.70 to complete pairs
-    MAX_COMPLETION_PRICE: float = 0.75      # Max price to pay when completing a pair
-    TARGET_PAIR_COST: float = 0.97          # Target pair cost for profitability (after fees)
+    AGGRESSIVE_BUY_THRESHOLD: float = 0.30  # 39% of their trades are here
+    STANDARD_BUY_THRESHOLD: float = 0.40    # 49% of their trades are here
 
-    # Dynamic thresholds - DISABLED to match profitable account exactly
-    # The profitable account (0x93c22116) used fixed thresholds, not time-based
-    DYNAMIC_THRESHOLDS: bool = False  # Disabled - use fixed thresholds from profitable account
+    # PAIR COMPLETION - They buy completion side up to $0.90+
+    # Verified: 12% of trades are $0.80-$0.90, 7% over $0.90
+    MAX_COMPLETION_PRICE: float = 0.92      # Allow expensive completions like they do
+
+    # TARGET_PAIR_COST - EFFECTIVELY DISABLED (they take everything)
+    # Verified: 47.5% of their pairs are OVER $1.00
+    # Their max pair cost was $1.54
+    # Net profit: good pairs (+$88k) cover bad pairs (-$49k) = +$38.5k
+    TARGET_PAIR_COST: float = 2.00          # No limit - mirror their behavior exactly
+
+    # Dynamic thresholds - DISABLED (they use fixed thresholds)
+    DYNAMIC_THRESHOLDS: bool = False
     THRESHOLDS_BY_TIME = {
-        # (min_seconds, max_seconds): (aggressive, standard)
-        (0, 30): (0.28, 0.38),      # Final 30s: slightly wider (fill risk)
-        (30, 60): (0.22, 0.32),     # 30-60s: tighter (30-60s anomaly in data)
-        (60, 120): (0.25, 0.35),    # 1-2min: standard (sweet spot)
-        (120, 300): (0.25, 0.35),   # 2-5min: standard (good volume)
-        (300, 600): (0.22, 0.32),   # 5-10min: tighter (moderate opps)
-        (600, 900): (0.20, 0.30),   # 10-15min: very tight (limited opps)
+        (0, 30): (0.28, 0.38),
+        (30, 60): (0.22, 0.32),
+        (60, 120): (0.25, 0.35),
+        (120, 300): (0.25, 0.35),
+        (300, 600): (0.22, 0.32),
+        (600, 900): (0.20, 0.30),
     }
 
-    # Pair cost limits - for PAIR_ACCUMULATION strategy
-    # Markets typically sum to ~$1.00. Profit = $1.00 payout - pair_cost - fees
-    # From analysis: avg pair cost was $0.9665, profitable markets had <$0.98
-    MAX_PAIR_COST: float = 0.98             # Never buy if projected pair > this
+    # MAX_PAIR_COST - EFFECTIVELY DISABLED to mirror exactly
+    # Verified: Their max pair cost was $1.54
+    # They take ALL opportunities, let winners cover losers
+    MAX_PAIR_COST: float = 2.00             # No limit - mirror their behavior exactly
 
-    # Position limits
-    MAX_POSITION_PER_MARKET: float = 500.0
-    MAX_TOTAL_EXPOSURE: float = 2000.0
-    MAX_CONCURRENT_MARKETS: int = 4
+    # Position limits - scaled for small account ($200-500)
+    # Verified: They avg $2,365/market, we scale down ~10x
+    MAX_POSITION_PER_MARKET: float = 250.0    # ~10% of their median ($1,048)
+    MAX_TOTAL_EXPOSURE: float = 500.0         # For $200-500 account
+    MAX_CONCURRENT_MARKETS: int = 4           # Focus on fewer markets with small capital
+
+    # Position sizing by price (mirrors their pattern)
+    # Verified: Cheap trades avg $5, Mid $27, Expensive $62
+    # We scale proportionally for small account
+    TRADE_SIZE_CHEAP: float = 2.0             # Trades at < $0.30
+    TRADE_SIZE_MID: float = 5.0               # Trades at $0.30-$0.60
+    TRADE_SIZE_EXPENSIVE: float = 10.0        # Trades at > $0.60
 
     # Timing
     PRICE_CHECK_INTERVAL_SEC: float = 1.0
@@ -1281,15 +1296,21 @@ def parse_market_with_tokens(market_data: dict) -> Optional[dict]:
 # =============================================================================
 
 def calculate_trade_size(price: float) -> float:
-    """Calculate trade size based on price (smaller at higher prices)."""
-    if price < 0.15:
-        return CONFIG.TRADE_SIZE_BASE * 2.0
-    elif price < 0.25:
-        return CONFIG.TRADE_SIZE_BASE * 1.5
-    elif price < 0.35:
-        return CONFIG.TRADE_SIZE_BASE
+    """Calculate trade size based on price.
+
+    Mirrors verified account behavior:
+    - Cheap trades (<$0.30): Small size (avg $5.37, median $1.25)
+    - Mid trades ($0.30-$0.60): Medium size (avg $27, median $6)
+    - Expensive trades (>$0.60): Larger size (avg $62, median $16)
+
+    Scaled for small account using CONFIG values.
+    """
+    if price < 0.30:
+        return CONFIG.TRADE_SIZE_CHEAP       # Small accumulation trades
+    elif price < 0.60:
+        return CONFIG.TRADE_SIZE_MID         # Medium trades
     else:
-        return CONFIG.TRADE_SIZE_BASE * 0.5
+        return CONFIG.TRADE_SIZE_EXPENSIVE   # Completion trades (larger)
 
 
 def calculate_taker_fee(price: float, trade_size_usd: float) -> float:
