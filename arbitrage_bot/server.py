@@ -63,11 +63,15 @@ class Config:
     API_SECRET: str = ""
     PRIVATE_KEY: str = ""  # Wallet private key for signing
 
-    # Entry thresholds (from wallet analysis: optimized by time-to-resolution)
-    # Default thresholds (used when time-to-resolution unknown)
-    AGGRESSIVE_BUY_THRESHOLD: float = 0.25  # Always buy below this
-    STANDARD_BUY_THRESHOLD: float = 0.35    # Buy if pair cost is good
-    MAX_ENTRY_PRICE: float = 0.50           # Never buy above this
+    # Entry thresholds (from wallet analysis of profitable accounts)
+    # PAIR_ACCUMULATION strategy: Buy cheap sides, then complete pairs
+    AGGRESSIVE_BUY_THRESHOLD: float = 0.30  # Always buy below this (44% of their buys)
+    STANDARD_BUY_THRESHOLD: float = 0.40    # Buy if pair cost is good
+
+    # PAIR COMPLETION thresholds - buy other side to complete pair even if expensive
+    # From analysis: they buy at $0.57-$0.70 to complete pairs
+    MAX_COMPLETION_PRICE: float = 0.75      # Max price to pay when completing a pair
+    TARGET_PAIR_COST: float = 0.97          # Target pair cost for profitability (after fees)
 
     # Dynamic thresholds by time-to-resolution (from 17k trade analysis)
     # Key insight: Prices drop 32% closer to resolution, more opportunities appear
@@ -82,11 +86,10 @@ class Config:
         (600, 900): (0.20, 0.30),   # 10-15min: very tight (limited opps)
     }
 
-    # Pair cost targets - for PAIR_ACCUMULATION strategy
-    # Markets typically sum to ~$1.00. We accumulate cheap sides over time.
-    # The profit comes from getting BOTH sides cheaply, not immediate arbitrage.
-    TARGET_PAIR_COST: float = 0.95          # Ideal accumulated pair cost target
-    MAX_PAIR_COST: float = 1.10             # Allow buying when market sums to $1.00+
+    # Pair cost limits - for PAIR_ACCUMULATION strategy
+    # Markets typically sum to ~$1.00. Profit = $1.00 payout - pair_cost - fees
+    # From analysis: avg pair cost was $0.9665, profitable markets had <$0.98
+    MAX_PAIR_COST: float = 0.98             # Never buy if projected pair > this
 
     # Position limits
     MAX_POSITION_PER_MARKET: float = 500.0
@@ -1446,61 +1449,74 @@ async def process_market_signal(market: MarketPrice):
         logger.info(f"BLOCKED {asset}: Pair cost {market.pair_cost:.3f} > MAX {CONFIG.MAX_PAIR_COST}")
         return  # Market pair cost too high, no arbitrage opportunity
 
-    # Get existing position for hedge ratio and pair cost checks
+    # Get existing position for pair completion logic
     position = STATE.account.positions.get(market.condition_id)
 
-    # Check Up side - using dynamic thresholds
-    up_signal_type = None
-    if market.up_price < aggressive_threshold:
-        # SAFETY CHECK 3: Even aggressive buys must have reasonable pair cost
-        projected_pair = market.up_price + market.down_price
-        if projected_pair < CONFIG.MAX_PAIR_COST:
-            # SAFETY CHECK 4: Check hedge ratio - don't go too unbalanced
-            if position and position.up_shares > 0 and position.down_shares == 0:
-                # Already holding Up only - need to buy Down first or skip
-                pass  # Skip this Up buy
-            else:
-                up_signal_type = "AGGRESSIVE"
-    elif market.up_price < standard_threshold:
-        # Check if pair cost would be acceptable
-        current_pair = position.pair_cost if position and position.pair_cost > 0 else market.pair_cost
-        if current_pair < CONFIG.TARGET_PAIR_COST:
-            # Check hedge ratio
-            if position:
-                hedge = position.hedge_ratio
-                if hedge == 0 or hedge >= CONFIG.MIN_HEDGE_RATIO:
-                    up_signal_type = "STANDARD"
-            else:
-                up_signal_type = "STANDARD"
+    # =========================================================================
+    # PAIR_ACCUMULATION STRATEGY (from profitable account analysis)
+    # =========================================================================
+    # 1. Buy cheap sides aggressively (<$0.30)
+    # 2. Buy moderately cheap sides (<$0.40) if pair cost still good
+    # 3. PAIR COMPLETION: Buy the other side (even at $0.50-$0.75) to complete pair
+    #
+    # Key insight: 86.9% of their markets have BOTH sides. They complete pairs.
+    # =========================================================================
 
-    # Check Down side - using dynamic thresholds
+    up_signal_type = None
     down_signal_type = None
+
+    # Calculate projected pair costs for decision making
+    if position and position.up_shares > 0:
+        # We have Up - what would pair cost be if we buy Down now?
+        projected_pair_if_buy_down = position.up_avg_price + market.down_price
+    else:
+        projected_pair_if_buy_down = market.up_price + market.down_price
+
+    if position and position.down_shares > 0:
+        # We have Down - what would pair cost be if we buy Up now?
+        projected_pair_if_buy_up = market.up_price + position.down_avg_price
+    else:
+        projected_pair_if_buy_up = market.up_price + market.down_price
+
+    # ----- CHECK UP SIDE -----
+    if market.up_price < aggressive_threshold:
+        # AGGRESSIVE: Always buy very cheap sides
+        if projected_pair_if_buy_up < CONFIG.MAX_PAIR_COST:
+            up_signal_type = "AGGRESSIVE"
+    elif market.up_price < standard_threshold:
+        # STANDARD: Buy moderately cheap if pair cost is good
+        if projected_pair_if_buy_up < CONFIG.TARGET_PAIR_COST:
+            up_signal_type = "STANDARD"
+    elif position and position.down_shares > 0 and position.up_shares == 0:
+        # PAIR COMPLETION: We have Down only - buy Up to complete pair
+        # Even at higher prices (up to MAX_COMPLETION_PRICE) if pair is profitable
+        if market.up_price < CONFIG.MAX_COMPLETION_PRICE:
+            if projected_pair_if_buy_up < CONFIG.TARGET_PAIR_COST:
+                up_signal_type = "PAIR_COMPLETE"
+                logger.info(f"PAIR_COMPLETE {asset}: Buying Up @ ${market.up_price:.3f} to complete pair (proj=${projected_pair_if_buy_up:.3f})")
+
+    # ----- CHECK DOWN SIDE -----
     if market.down_price < aggressive_threshold:
-        # SAFETY CHECK 3: Even aggressive buys must have reasonable pair cost
-        projected_pair = market.up_price + market.down_price
-        if projected_pair < CONFIG.MAX_PAIR_COST:
-            # SAFETY CHECK 4: Check hedge ratio - don't go too unbalanced
-            if position and position.down_shares > 0 and position.up_shares == 0:
-                # Already holding Down only - need to buy Up first or skip
-                pass  # Skip this Down buy
-            else:
-                down_signal_type = "AGGRESSIVE"
+        # AGGRESSIVE: Always buy very cheap sides
+        if projected_pair_if_buy_down < CONFIG.MAX_PAIR_COST:
+            down_signal_type = "AGGRESSIVE"
     elif market.down_price < standard_threshold:
-        current_pair = position.pair_cost if position and position.pair_cost > 0 else market.pair_cost
-        if current_pair < CONFIG.TARGET_PAIR_COST:
-            # Check hedge ratio
-            if position:
-                hedge = position.hedge_ratio
-                if hedge == 0 or hedge >= CONFIG.MIN_HEDGE_RATIO:
-                    down_signal_type = "STANDARD"
-            else:
-                down_signal_type = "STANDARD"
+        # STANDARD: Buy moderately cheap if pair cost is good
+        if projected_pair_if_buy_down < CONFIG.TARGET_PAIR_COST:
+            down_signal_type = "STANDARD"
+    elif position and position.up_shares > 0 and position.down_shares == 0:
+        # PAIR COMPLETION: We have Up only - buy Down to complete pair
+        # Even at higher prices (up to MAX_COMPLETION_PRICE) if pair is profitable
+        if market.down_price < CONFIG.MAX_COMPLETION_PRICE:
+            if projected_pair_if_buy_down < CONFIG.TARGET_PAIR_COST:
+                down_signal_type = "PAIR_COMPLETE"
+                logger.info(f"PAIR_COMPLETE {asset}: Buying Down @ ${market.down_price:.3f} to complete pair (proj=${projected_pair_if_buy_down:.3f})")
 
     detection_ms = (time.perf_counter() - t_detection_start) * 1000
 
     # DEBUG: Log signal types
     if up_signal_type or down_signal_type:
-        logger.info(f"SIGNAL {asset}: up_type={up_signal_type} down_type={down_signal_type} up_token={bool(market.up_token_id)} down_token={bool(market.down_token_id)}")
+        logger.info(f"SIGNAL {asset}: up_type={up_signal_type} down_type={down_signal_type} pair_cost=${projected_pair_if_buy_up:.3f}/${projected_pair_if_buy_down:.3f}")
 
     # Process Up signal
     if up_signal_type and market.up_token_id:
@@ -1931,6 +1947,7 @@ async def broadcast_state():
         "config": {
             "AGGRESSIVE_BUY_THRESHOLD": CONFIG.AGGRESSIVE_BUY_THRESHOLD,
             "STANDARD_BUY_THRESHOLD": CONFIG.STANDARD_BUY_THRESHOLD,
+            "MAX_COMPLETION_PRICE": CONFIG.MAX_COMPLETION_PRICE,
             "TARGET_PAIR_COST": CONFIG.TARGET_PAIR_COST,
             "MAX_PAIR_COST": CONFIG.MAX_PAIR_COST,
         },
@@ -2356,6 +2373,8 @@ async def update_config(config: dict):
         CONFIG.AGGRESSIVE_BUY_THRESHOLD = float(config["AGGRESSIVE_BUY_THRESHOLD"])
     if "STANDARD_BUY_THRESHOLD" in config:
         CONFIG.STANDARD_BUY_THRESHOLD = float(config["STANDARD_BUY_THRESHOLD"])
+    if "MAX_COMPLETION_PRICE" in config:
+        CONFIG.MAX_COMPLETION_PRICE = float(config["MAX_COMPLETION_PRICE"])
     if "TARGET_PAIR_COST" in config:
         CONFIG.TARGET_PAIR_COST = float(config["TARGET_PAIR_COST"])
     if "MAX_PAIR_COST" in config:
@@ -2364,6 +2383,7 @@ async def update_config(config: dict):
     return {"status": "updated", "config": {
         "AGGRESSIVE_BUY_THRESHOLD": CONFIG.AGGRESSIVE_BUY_THRESHOLD,
         "STANDARD_BUY_THRESHOLD": CONFIG.STANDARD_BUY_THRESHOLD,
+        "MAX_COMPLETION_PRICE": CONFIG.MAX_COMPLETION_PRICE,
         "TARGET_PAIR_COST": CONFIG.TARGET_PAIR_COST,
         "MAX_PAIR_COST": CONFIG.MAX_PAIR_COST,
     }}
@@ -2429,6 +2449,7 @@ async def websocket_endpoint(websocket: WebSocket):
         "config": {
             "AGGRESSIVE_BUY_THRESHOLD": CONFIG.AGGRESSIVE_BUY_THRESHOLD,
             "STANDARD_BUY_THRESHOLD": CONFIG.STANDARD_BUY_THRESHOLD,
+            "MAX_COMPLETION_PRICE": CONFIG.MAX_COMPLETION_PRICE,
             "TARGET_PAIR_COST": CONFIG.TARGET_PAIR_COST,
             "MAX_PAIR_COST": CONFIG.MAX_PAIR_COST,
         },
@@ -2498,7 +2519,7 @@ if __name__ == "__main__":
 
     print(f"\n Server: http://{args.host}:{args.port}/arbitrage/")
     print(f" Trade logs: {TRADE_LOG_FILE}")
-    print(f" Thresholds: Aggressive <${CONFIG.AGGRESSIVE_BUY_THRESHOLD:.2f}, Standard <${CONFIG.STANDARD_BUY_THRESHOLD:.2f}")
+    print(f" Thresholds: Aggressive <${CONFIG.AGGRESSIVE_BUY_THRESHOLD:.2f}, Standard <${CONFIG.STANDARD_BUY_THRESHOLD:.2f}, PairComplete <${CONFIG.MAX_COMPLETION_PRICE:.2f}")
     print("=" * 70 + "\n")
 
     logger.info(f"Starting server on http://{args.host}:{args.port}")
