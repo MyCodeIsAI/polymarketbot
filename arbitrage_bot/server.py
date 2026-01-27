@@ -117,7 +117,7 @@ class Config:
 CONFIG = Config()
 
 # Set to SOL-only for initial testing (best opportunity rate)
-CONFIG.ENABLED_ASSETS = ["sol"]  # Change to ["sol", "eth", "btc"] or None for all
+CONFIG.ENABLED_ASSETS = None  # All assets for simulation data collection (change to ["sol"] for live)
 
 # Load API keys from environment if available
 CONFIG.API_KEY = os.environ.get("POLYMARKET_API_KEY", "")
