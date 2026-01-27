@@ -100,6 +100,29 @@ class Config:
     # Risk
     MIN_HEDGE_RATIO: float = 0.70           # Accept up to 30% imbalance
 
+    # ==========================================================================
+    # CIRCUIT BREAKERS / FAILSAFES - Prevent catastrophic losses
+    # ==========================================================================
+    # These match the risk profile of analyzed wallet 0x93c22116
+
+    # Max loss before emergency stop (as % of starting balance)
+    MAX_DAILY_LOSS_PCT: float = 25.0        # Stop if down 25% from start
+
+    # Max unhedged exposure (one-sided positions at risk)
+    MAX_UNHEDGED_EXPOSURE: float = 100.0    # Max $ in unhedged positions
+
+    # Consecutive loss circuit breaker
+    MAX_CONSECUTIVE_LOSSES: int = 5         # Stop after 5 losses in a row
+
+    # API error circuit breaker
+    MAX_API_ERRORS_PER_HOUR: int = 10       # Stop if too many API errors
+
+    # Position completion timeout (seconds) - warn if positions not pairing
+    POSITION_AGE_WARNING_SEC: int = 600     # Warn after 10 min unhedged
+
+    # Emergency stop flag (set True to halt all trading)
+    EMERGENCY_STOP: bool = False
+
     # Paper trading
     STARTING_BALANCE: float = 200.0
     TRADE_SIZE_BASE: float = 15.0
@@ -701,6 +724,14 @@ class AppState:
     connected_clients: Set[WebSocket] = field(default_factory=set)
     last_price_update: Optional[datetime] = None
 
+    # Circuit breaker tracking
+    consecutive_losses: int = 0
+    api_error_timestamps: List[float] = field(default_factory=list)  # Timestamps of API errors
+    circuit_breaker_triggered: bool = False
+    circuit_breaker_reason: str = ""
+    session_start_time: datetime = field(default_factory=datetime.utcnow)
+    session_start_balance: float = 0.0  # Set on first trade
+
 STATE = AppState()
 
 # =============================================================================
@@ -1024,6 +1055,73 @@ def calculate_trade_size(price: float) -> float:
         return CONFIG.TRADE_SIZE_BASE * 0.5
 
 
+def check_circuit_breakers() -> tuple:
+    """Check all circuit breakers. Returns (should_halt, reason).
+
+    Circuit breakers protect against catastrophic losses:
+    1. Emergency stop flag - manual kill switch
+    2. Max daily loss - stop if down too much from start
+    3. Max unhedged exposure - too many one-sided positions
+    4. Max consecutive losses - losing streak detection
+    5. Max API errors - system instability detection
+    """
+    # 1. Emergency stop (manual override)
+    if CONFIG.EMERGENCY_STOP:
+        return (True, "EMERGENCY_STOP flag is set")
+
+    # 2. Already triggered
+    if STATE.circuit_breaker_triggered:
+        return (True, STATE.circuit_breaker_reason)
+
+    # 3. Max daily loss check
+    if STATE.session_start_balance > 0:
+        current_balance = STATE.account.balance + STATE.account.open_exposure
+        loss_pct = (STATE.session_start_balance - current_balance) / STATE.session_start_balance * 100
+        if loss_pct >= CONFIG.MAX_DAILY_LOSS_PCT:
+            reason = f"Daily loss limit: {loss_pct:.1f}% >= {CONFIG.MAX_DAILY_LOSS_PCT}%"
+            STATE.circuit_breaker_triggered = True
+            STATE.circuit_breaker_reason = reason
+            logger.critical(f"🛑 CIRCUIT BREAKER: {reason}")
+            return (True, reason)
+
+    # 4. Max unhedged exposure check
+    total_unhedged = 0
+    for pos in STATE.account.positions.values():
+        unhedged_up = max(0, pos.up_shares - pos.down_shares) * pos.up_avg_price
+        unhedged_down = max(0, pos.down_shares - pos.up_shares) * pos.down_avg_price
+        total_unhedged += unhedged_up + unhedged_down
+
+    if total_unhedged > CONFIG.MAX_UNHEDGED_EXPOSURE:
+        reason = f"Unhedged exposure: ${total_unhedged:.2f} > ${CONFIG.MAX_UNHEDGED_EXPOSURE:.2f}"
+        STATE.circuit_breaker_triggered = True
+        STATE.circuit_breaker_reason = reason
+        logger.critical(f"🛑 CIRCUIT BREAKER: {reason}")
+        return (True, reason)
+
+    # 5. Max consecutive losses check
+    if STATE.consecutive_losses >= CONFIG.MAX_CONSECUTIVE_LOSSES:
+        reason = f"Consecutive losses: {STATE.consecutive_losses} >= {CONFIG.MAX_CONSECUTIVE_LOSSES}"
+        STATE.circuit_breaker_triggered = True
+        STATE.circuit_breaker_reason = reason
+        logger.critical(f"🛑 CIRCUIT BREAKER: {reason}")
+        return (True, reason)
+
+    # 6. Max API errors per hour check
+    now = time.time()
+    hour_ago = now - 3600
+    recent_errors = [ts for ts in STATE.api_error_timestamps if ts > hour_ago]
+    STATE.api_error_timestamps = recent_errors  # Clean up old timestamps
+
+    if len(recent_errors) >= CONFIG.MAX_API_ERRORS_PER_HOUR:
+        reason = f"API errors: {len(recent_errors)} in last hour >= {CONFIG.MAX_API_ERRORS_PER_HOUR}"
+        STATE.circuit_breaker_triggered = True
+        STATE.circuit_breaker_reason = reason
+        logger.critical(f"🛑 CIRCUIT BREAKER: {reason}")
+        return (True, reason)
+
+    return (False, "")
+
+
 def get_dynamic_thresholds(time_to_resolution: float) -> tuple:
     """Get aggressive and standard thresholds based on time to resolution.
 
@@ -1043,6 +1141,17 @@ def get_dynamic_thresholds(time_to_resolution: float) -> tuple:
 async def process_market_signal(market: MarketPrice):
     """Process a market tick and generate/execute signals."""
     t_detection_start = time.perf_counter()
+
+    # CIRCUIT BREAKER CHECK - halt all trading if triggered
+    should_halt, reason = check_circuit_breakers()
+    if should_halt:
+        logger.warning(f"CIRCUIT BREAKER ACTIVE: {reason} - Skipping all signals")
+        return
+
+    # Initialize session start balance on first signal
+    if STATE.session_start_balance == 0:
+        STATE.session_start_balance = STATE.account.balance
+        logger.info(f"Session start balance set: ${STATE.session_start_balance:.2f}")
 
     # DEBUG: Log every market check
     asset = market.slug.split('-')[0].upper()[:3]
@@ -1288,6 +1397,23 @@ async def execute_signal(
     order_status = "SIMULATED_FILL" if is_simulation and result["success"] else \
                    "SIMULATED_MISS" if is_simulation and not result["success"] else \
                    "LIVE_FILL" if result["success"] else "LIVE_FAIL"
+
+    # =========================================================================
+    # CIRCUIT BREAKER TRACKING - Track failures and errors
+    # =========================================================================
+    if result.get("is_api_error"):
+        STATE.api_error_timestamps.append(time.time())
+        logger.warning(f"API ERROR tracked: {result.get('error_message', 'Unknown')}")
+
+    if result["success"]:
+        # Reset consecutive losses on success
+        if STATE.consecutive_losses > 0:
+            logger.info(f"Win after {STATE.consecutive_losses} consecutive losses - resetting counter")
+        STATE.consecutive_losses = 0
+    else:
+        # Increment consecutive losses (only for MISS/FAIL, not for skips)
+        STATE.consecutive_losses += 1
+        logger.warning(f"Consecutive losses: {STATE.consecutive_losses}/{CONFIG.MAX_CONSECUTIVE_LOSSES}")
 
     trade_log = DetailedTradeLog(
         timestamp=datetime.utcnow().isoformat(),
@@ -1563,6 +1689,19 @@ async def index():
 @app.get("/arbitrage/api/status")
 async def get_status():
     """Get current status."""
+    # Calculate current unhedged exposure
+    total_unhedged = 0
+    for pos in STATE.account.positions.values():
+        unhedged_up = max(0, pos.up_shares - pos.down_shares) * pos.up_avg_price
+        unhedged_down = max(0, pos.down_shares - pos.up_shares) * pos.down_avg_price
+        total_unhedged += unhedged_up + unhedged_down
+
+    # Calculate loss percentage
+    loss_pct = 0
+    if STATE.session_start_balance > 0:
+        current_value = STATE.account.balance + STATE.account.open_exposure
+        loss_pct = (STATE.session_start_balance - current_value) / STATE.session_start_balance * 100
+
     return {
         "running": STATE.is_running,
         "account": STATE.account.to_dict(),
@@ -1570,6 +1709,19 @@ async def get_status():
         "signals_count": len(STATE.signals),
         "latency": LATENCY.to_dict(),
         "last_update": STATE.last_price_update.isoformat() if STATE.last_price_update else None,
+        "circuit_breakers": {
+            "triggered": STATE.circuit_breaker_triggered,
+            "reason": STATE.circuit_breaker_reason,
+            "consecutive_losses": STATE.consecutive_losses,
+            "max_consecutive_losses": CONFIG.MAX_CONSECUTIVE_LOSSES,
+            "api_errors_last_hour": len([ts for ts in STATE.api_error_timestamps if ts > time.time() - 3600]),
+            "max_api_errors_per_hour": CONFIG.MAX_API_ERRORS_PER_HOUR,
+            "unhedged_exposure": round(total_unhedged, 2),
+            "max_unhedged_exposure": CONFIG.MAX_UNHEDGED_EXPOSURE,
+            "loss_pct": round(loss_pct, 2),
+            "max_daily_loss_pct": CONFIG.MAX_DAILY_LOSS_PCT,
+            "session_start_balance": STATE.session_start_balance,
+        },
     }
 
 
@@ -1833,8 +1985,35 @@ async def reset_account():
     )
     STATE.signals.clear()
     STATE.markets.clear()
+    STATE.consecutive_losses = 0
+    STATE.api_error_timestamps.clear()
+    STATE.circuit_breaker_triggered = False
+    STATE.circuit_breaker_reason = ""
+    STATE.session_start_balance = 0.0
     LATENCY = LatencyMetrics()
     return {"status": "reset"}
+
+
+@app.post("/arbitrage/api/reset-circuit-breaker")
+async def reset_circuit_breaker():
+    """Reset circuit breaker to resume trading.
+
+    Use this after investigating and fixing the issue that triggered
+    the circuit breaker. Does NOT reset account or positions.
+    """
+    old_reason = STATE.circuit_breaker_reason
+    STATE.circuit_breaker_triggered = False
+    STATE.circuit_breaker_reason = ""
+    STATE.consecutive_losses = 0
+    STATE.api_error_timestamps.clear()
+
+    logger.warning(f"Circuit breaker manually reset. Previous trigger: {old_reason}")
+
+    return {
+        "status": "circuit_breaker_reset",
+        "previous_reason": old_reason,
+        "message": "Trading can now resume. Monitor closely for recurring issues.",
+    }
 
 
 @app.post("/arbitrage/api/config")
