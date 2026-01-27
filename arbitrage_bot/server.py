@@ -184,8 +184,9 @@ class Config:
 
 CONFIG = Config()
 
-# Set to SOL-only for initial testing (best opportunity rate)
-CONFIG.ENABLED_ASSETS = None  # All assets for simulation data collection (change to ["sol"] for live)
+# Only trade the most profitable assets (exclude XRP - 0.87% ROI)
+# SOL: 4.17% ROI (best), BTC: 3.27% ROI (best volume)
+CONFIG.ENABLED_ASSETS = ["btc", "sol"]  # ETH 1.37% ROI - optional, XRP excluded
 
 # Load API keys from environment if available
 CONFIG.API_KEY = os.environ.get("POLYMARKET_API_KEY", "")
