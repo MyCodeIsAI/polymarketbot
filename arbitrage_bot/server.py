@@ -701,11 +701,47 @@ class Position:
 
 
 @dataclass
+class ResolvedPosition:
+    """A position that has been resolved (market closed)."""
+    condition_id: str
+    market_title: str
+    resolution_time: datetime
+    winning_outcome: str  # "Up" or "Down"
+
+    # Position details at resolution
+    up_shares: float
+    up_cost: float
+    down_shares: float
+    down_cost: float
+
+    # P/L calculation
+    payout: float  # Actual payout received
+    total_cost: float  # What we paid
+    realized_pl: float  # payout - cost
+
+    def to_dict(self) -> dict:
+        return {
+            "condition_id": self.condition_id,
+            "market_title": self.market_title,
+            "resolution_time": self.resolution_time.isoformat(),
+            "winning_outcome": self.winning_outcome,
+            "up_shares": round(self.up_shares, 2),
+            "up_cost": round(self.up_cost, 2),
+            "down_shares": round(self.down_shares, 2),
+            "down_cost": round(self.down_cost, 2),
+            "payout": round(self.payout, 2),
+            "total_cost": round(self.total_cost, 2),
+            "realized_pl": round(self.realized_pl, 2),
+        }
+
+
+@dataclass
 class PaperAccount:
     """Paper trading account."""
     balance: float = 1000.0
     starting_balance: float = 1000.0
     positions: Dict[str, Position] = field(default_factory=dict)
+    resolved_positions: List[ResolvedPosition] = field(default_factory=list)
     order_attempts: List[OrderAttempt] = field(default_factory=list)
 
     @property
@@ -716,12 +752,25 @@ class PaperAccount:
     def open_positions_count(self) -> int:
         return len([p for p in self.positions.values() if p.total_cost > 0])
 
+    @property
+    def realized_pl(self) -> float:
+        """Total realized P/L from resolved positions."""
+        return sum(rp.realized_pl for rp in self.resolved_positions)
+
+    @property
+    def total_payout(self) -> float:
+        """Total payout received from resolved positions."""
+        return sum(rp.payout for rp in self.resolved_positions)
+
     def to_dict(self) -> dict:
         return {
             "balance": round(self.balance, 2),
             "starting_balance": self.starting_balance,
             "open_exposure": round(self.open_exposure, 2),
             "open_positions": self.open_positions_count,
+            "realized_pl": round(self.realized_pl, 2),
+            "total_payout": round(self.total_payout, 2),
+            "resolved_count": len(self.resolved_positions),
             "total_order_attempts": len(self.order_attempts),
             "positions": {k: v.to_dict() for k, v in self.positions.items()},
         }
@@ -864,6 +913,145 @@ async def fetch_order_book(token_id: str) -> Optional[dict]:
         except Exception as e:
             logger.debug(f"Error fetching order book for {token_id[:16]}...: {e}")
             return None
+
+
+async def fetch_market_resolution(condition_id: str) -> Optional[dict]:
+    """Fetch market resolution status from Gamma API.
+
+    Returns dict with:
+    - resolved: bool
+    - winning_outcome: "Up" or "Down" or None
+    - resolution_time: datetime or None
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            # Query market by condition_id
+            resp = await client.get(
+                f"{GAMMA_API}/markets",
+                params={"condition_id": condition_id}
+            )
+            if resp.status_code != 200:
+                return None
+
+            markets = resp.json()
+            if not markets:
+                return None
+
+            market = markets[0] if isinstance(markets, list) else markets
+
+            # Check if market is closed/resolved
+            closed = market.get("closed", False)
+            if not closed:
+                return {"resolved": False, "winning_outcome": None, "resolution_time": None}
+
+            # Get resolution data
+            # outcomePrices after resolution: winning side = 1.0, losing side = 0.0
+            outcome_prices = market.get("outcomePrices", [])
+            if isinstance(outcome_prices, str):
+                try:
+                    outcome_prices = json.loads(outcome_prices)
+                except:
+                    outcome_prices = []
+
+            winning_outcome = None
+            if outcome_prices and len(outcome_prices) >= 2:
+                up_price = float(outcome_prices[0])
+                down_price = float(outcome_prices[1])
+                # After resolution: winner = 1.0, loser = 0.0
+                if up_price > 0.9:
+                    winning_outcome = "Up"
+                elif down_price > 0.9:
+                    winning_outcome = "Down"
+
+            # Parse resolution time
+            resolution_time = None
+            end_date_str = market.get("endDate")
+            if end_date_str:
+                try:
+                    resolution_time = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                    resolution_time = resolution_time.replace(tzinfo=None)
+                except:
+                    pass
+
+            return {
+                "resolved": True,
+                "winning_outcome": winning_outcome,
+                "resolution_time": resolution_time,
+                "market_title": market.get("question", "Unknown"),
+            }
+
+        except Exception as e:
+            logger.debug(f"Error fetching resolution for {condition_id[:16]}...: {e}")
+            return None
+
+
+async def check_and_resolve_positions():
+    """Check all open positions for resolution and calculate realized P/L."""
+    if not STATE.account.positions:
+        return
+
+    resolved_condition_ids = []
+
+    for condition_id, position in STATE.account.positions.items():
+        # Skip if already resolved (shouldn't happen but safety check)
+        if position.total_cost == 0:
+            continue
+
+        resolution = await fetch_market_resolution(condition_id)
+        if not resolution or not resolution.get("resolved"):
+            continue
+
+        winning_outcome = resolution.get("winning_outcome")
+        if not winning_outcome:
+            logger.warning(f"Market {condition_id[:16]} resolved but no winner determined")
+            continue
+
+        # Calculate payout
+        # If Up wins: payout = up_shares * $1.00
+        # If Down wins: payout = down_shares * $1.00
+        if winning_outcome == "Up":
+            payout = position.up_shares * 1.0
+        else:
+            payout = position.down_shares * 1.0
+
+        total_cost = position.total_cost
+        realized_pl = payout - total_cost
+
+        # Create resolved position record
+        resolved = ResolvedPosition(
+            condition_id=condition_id,
+            market_title=position.market_title,
+            resolution_time=resolution.get("resolution_time") or datetime.utcnow(),
+            winning_outcome=winning_outcome,
+            up_shares=position.up_shares,
+            up_cost=position.up_cost,
+            down_shares=position.down_shares,
+            down_cost=position.down_cost,
+            payout=payout,
+            total_cost=total_cost,
+            realized_pl=realized_pl,
+        )
+        STATE.account.resolved_positions.append(resolved)
+
+        # Add payout to balance
+        STATE.account.balance += payout
+
+        logger.info(
+            f"📊 RESOLVED: {position.market_title[:40]} | "
+            f"Winner: {winning_outcome} | "
+            f"Payout: ${payout:.2f} | Cost: ${total_cost:.2f} | "
+            f"P/L: ${realized_pl:+.2f}"
+        )
+
+        resolved_condition_ids.append(condition_id)
+
+    # Remove resolved positions from active positions
+    for cid in resolved_condition_ids:
+        del STATE.account.positions[cid]
+
+    if resolved_condition_ids:
+        total_realized = STATE.account.realized_pl
+        logger.info(f"Resolved {len(resolved_condition_ids)} positions. Total realized P/L: ${total_realized:+.2f}")
 
 
 async def submit_order_simulation(token_id: str, side: str, price: float, size: float, fill_estimate: RealisticFillEstimate) -> dict:
@@ -1638,6 +1826,9 @@ async def price_loop():
             # Check for front-running on recent trades
             await check_competition_tracking()
 
+            # Check for resolved positions and calculate realized P/L
+            await check_and_resolve_positions()
+
             loop_time_ms = (time.perf_counter() - t_loop_start) * 1000
             logger.debug(f"Price loop: {len(STATE.markets)} markets, {loop_time_ms:.0f}ms, {len(TRADE_LOGS)} trades logged")
 
@@ -1848,6 +2039,64 @@ def calculate_pl_stats() -> dict:
 async def get_pl():
     """Get P/L statistics."""
     return calculate_pl_stats()
+
+
+@app.get("/arbitrage/api/realized-pl")
+async def get_realized_pl():
+    """Get realized P/L from resolved positions."""
+    resolved = STATE.account.resolved_positions
+
+    # Calculate totals
+    total_payout = sum(r.payout for r in resolved)
+    total_cost = sum(r.total_cost for r in resolved)
+    total_realized_pl = sum(r.realized_pl for r in resolved)
+
+    # Wins vs losses
+    wins = [r for r in resolved if r.realized_pl > 0]
+    losses = [r for r in resolved if r.realized_pl < 0]
+    breakeven = [r for r in resolved if r.realized_pl == 0]
+
+    # By winning outcome
+    up_wins = [r for r in resolved if r.winning_outcome == "Up"]
+    down_wins = [r for r in resolved if r.winning_outcome == "Down"]
+
+    return {
+        "summary": {
+            "total_resolved": len(resolved),
+            "total_payout": round(total_payout, 2),
+            "total_cost": round(total_cost, 2),
+            "total_realized_pl": round(total_realized_pl, 2),
+            "roi_pct": round((total_realized_pl / total_cost * 100) if total_cost > 0 else 0, 2),
+        },
+        "record": {
+            "wins": len(wins),
+            "losses": len(losses),
+            "breakeven": len(breakeven),
+            "win_rate": round(len(wins) / len(resolved) * 100 if resolved else 0, 1),
+        },
+        "by_outcome": {
+            "up_wins": len(up_wins),
+            "down_wins": len(down_wins),
+        },
+        "open_positions": len(STATE.account.positions),
+        "open_exposure": round(STATE.account.open_exposure, 2),
+        "positions": [r.to_dict() for r in resolved[-20:]],  # Last 20 resolved
+    }
+
+
+@app.post("/arbitrage/api/check-resolutions")
+async def check_resolutions():
+    """Manually trigger resolution check for all open positions."""
+    before_count = len(STATE.account.resolved_positions)
+    await check_and_resolve_positions()
+    after_count = len(STATE.account.resolved_positions)
+
+    return {
+        "status": "checked",
+        "new_resolutions": after_count - before_count,
+        "total_resolved": after_count,
+        "realized_pl": round(STATE.account.realized_pl, 2),
+    }
 
 
 @app.get("/arbitrage/api/simulation-stats")
