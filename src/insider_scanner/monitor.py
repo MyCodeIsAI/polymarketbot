@@ -542,6 +542,9 @@ class RealTimeMonitor:
         combined = f"{title} {' '.join(tags)} {slug}"
 
         # Check for category keywords
+        # NOTE: AWARDS must be checked before MILITARY because "Awards" contains "war"
+        if any(kw in combined for kw in ["oscar", "emmy", "grammy", "award", "nomination", "golden globe"]):
+            return MarketCategory.AWARDS
         if any(kw in combined for kw in ["election", "vote", "ballot", "president", "congress", "senate"]):
             return MarketCategory.ELECTION
         if any(kw in combined for kw in ["war", "military", "conflict", "attack", "invasion", "troops"]):
@@ -554,8 +557,6 @@ class RealTimeMonitor:
             return MarketCategory.TECH_LAUNCH  # Crypto -> TECH_LAUNCH (closest category)
         if any(kw in combined for kw in ["nfl", "nba", "mlb", "sports", "game", "match", "championship"]):
             return MarketCategory.SPORTS
-        if any(kw in combined for kw in ["oscar", "emmy", "grammy", "award", "nomination"]):
-            return MarketCategory.AWARDS
 
         return None
 
