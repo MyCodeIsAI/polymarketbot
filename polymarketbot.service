@@ -1,0 +1,30 @@
+[Unit]
+Description=PolymarketBot Insider Scanner Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=user
+WorkingDirectory=/home/user/Documents/polymarketbot
+Environment="PATH=/home/user/.local/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/home/user/Documents/polymarketbot/.env
+ExecStart=/usr/bin/python3 -m uvicorn src.web.app:get_app --host 0.0.0.0 --port 8766
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Logging
+StandardOutput=append:/var/log/polymarketbot/app.log
+StandardError=append:/var/log/polymarketbot/error.log
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/user/Documents/polymarketbot
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

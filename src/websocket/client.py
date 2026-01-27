@@ -372,6 +372,12 @@ class WebSocketClient:
                     logger.warning("websocket_invalid_json", data=data[:100])
                     continue
 
+                # Handle both dict and list messages
+                # Polymarket can send arrays of trades directly
+                if isinstance(message, list):
+                    # Wrap list in a dict for consistent handling
+                    message = {"type": "trades", "trades": message}
+
                 # Handle different message types
                 msg_type = message.get("type", "")
 

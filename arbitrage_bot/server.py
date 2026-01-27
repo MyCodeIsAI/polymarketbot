@@ -657,6 +657,7 @@ class Position:
     """Tracked position in a market (paper trading)."""
     condition_id: str
     market_title: str
+    slug: str = ""  # For resolution lookups via Gamma API
     up_shares: float = 0
     up_cost: float = 0
     down_shares: float = 0
@@ -698,6 +699,7 @@ class Position:
         return {
             "condition_id": self.condition_id,
             "market_title": self.market_title,
+            "slug": self.slug,
             "up_shares": self.up_shares,
             "up_cost": self.up_cost,
             "up_avg_price": round(self.up_avg_price, 4),
@@ -937,7 +939,7 @@ async def fetch_order_book(token_id: str) -> Optional[dict]:
             return None
 
 
-async def fetch_market_resolution(condition_id: str) -> Optional[dict]:
+async def fetch_market_resolution(slug: str) -> Optional[dict]:
     """Fetch market resolution status from Gamma API.
 
     Returns dict with:
@@ -945,12 +947,15 @@ async def fetch_market_resolution(condition_id: str) -> Optional[dict]:
     - winning_outcome: "Up" or "Down" or None
     - resolution_time: datetime or None
     """
+    if not slug:
+        return None
+
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            # Query market by condition_id
+            # Query market by slug (condition_id param doesn't work properly)
             resp = await client.get(
                 f"{GAMMA_API}/markets",
-                params={"condition_id": condition_id}
+                params={"slug": slug}
             )
             if resp.status_code != 200:
                 return None
@@ -1003,7 +1008,7 @@ async def fetch_market_resolution(condition_id: str) -> Optional[dict]:
             }
 
         except Exception as e:
-            logger.debug(f"Error fetching resolution for {condition_id[:16]}...: {e}")
+            logger.debug(f"Error fetching resolution for {slug}: {e}")
             return None
 
 
@@ -1019,13 +1024,19 @@ async def check_and_resolve_positions():
         if position.total_cost == 0:
             continue
 
-        resolution = await fetch_market_resolution(condition_id)
+        # Get slug - fallback to STATE.markets for legacy positions without slug
+        slug = position.slug
+        if not slug and condition_id in STATE.markets:
+            slug = STATE.markets[condition_id].slug
+            position.slug = slug  # Backfill for future lookups
+
+        resolution = await fetch_market_resolution(slug)
         if not resolution or not resolution.get("resolved"):
             continue
 
         winning_outcome = resolution.get("winning_outcome")
         if not winning_outcome:
-            logger.warning(f"Market {condition_id[:16]} resolved but no winner determined")
+            logger.warning(f"Market {position.slug} resolved but no winner determined")
             continue
 
         # Calculate payout
@@ -1712,6 +1723,7 @@ async def execute_signal(
         STATE.account.positions[market.condition_id] = Position(
             condition_id=market.condition_id,
             market_title=market.title,
+            slug=market.slug,  # For resolution lookups
             opened_at=datetime.utcnow(),
         )
 

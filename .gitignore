@@ -108,3 +108,5 @@ data/analyzed_accounts_TEST.json
 
 # NOTE: data/*.json.gz files ARE committed (compressed cache for quick-load on new VPS)
 data/analyzed_accounts_slim.json
+data/extraction_checkpoint.json
+data/test_scan_results.json
