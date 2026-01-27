@@ -103,25 +103,38 @@ class Config:
     # ==========================================================================
     # CIRCUIT BREAKERS / FAILSAFES - Prevent catastrophic losses
     # ==========================================================================
-    # These match the risk profile of analyzed wallet 0x93c22116
+    # Configured for: $200 balance, SOL-only when live, all markets for simulation
+    #
+    # SIMULATION MODE: Higher limits to collect data across all markets
+    # LIVE MODE: Tighter limits since it's real money on 1 market
 
     # Max loss before emergency stop (as % of starting balance)
-    MAX_DAILY_LOSS_PCT: float = 25.0        # Stop if down 25% from start
+    MAX_DAILY_LOSS_PCT: float = 50.0        # Stop if down 50% (allows more sim data)
 
     # Max unhedged exposure (one-sided positions at risk)
-    MAX_UNHEDGED_EXPOSURE: float = 100.0    # Max $ in unhedged positions
+    # For $200 balance: allow up to 75% unhedged in simulation
+    # When going live with SOL-only, reduce to $50-75
+    MAX_UNHEDGED_EXPOSURE: float = 150.0    # Max $ in unhedged positions
 
     # Consecutive loss circuit breaker
-    MAX_CONSECUTIVE_LOSSES: int = 5         # Stop after 5 losses in a row
+    MAX_CONSECUTIVE_LOSSES: int = 10        # Higher for simulation data collection
 
     # API error circuit breaker
-    MAX_API_ERRORS_PER_HOUR: int = 10       # Stop if too many API errors
+    MAX_API_ERRORS_PER_HOUR: int = 20       # Higher tolerance for simulation
 
     # Position completion timeout (seconds) - warn if positions not pairing
     POSITION_AGE_WARNING_SEC: int = 600     # Warn after 10 min unhedged
 
     # Emergency stop flag (set True to halt all trading)
     EMERGENCY_STOP: bool = False
+
+    # ==========================================================================
+    # LIVE MODE RECOMMENDED SETTINGS (uncomment when going live with $200):
+    # MAX_DAILY_LOSS_PCT = 25.0       # Stop at 25% loss ($50)
+    # MAX_UNHEDGED_EXPOSURE = 75.0    # Max 37.5% of balance unhedged
+    # MAX_CONSECUTIVE_LOSSES = 5      # Tighter for real money
+    # MAX_API_ERRORS_PER_HOUR = 10    # Lower tolerance
+    # ==========================================================================
 
     # Paper trading
     STARTING_BALANCE: float = 200.0
