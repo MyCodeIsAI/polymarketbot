@@ -1508,13 +1508,13 @@ async def process_market_signal(market: MarketPrice):
         # STANDARD: Buy moderately cheap if pair cost is good
         if projected_pair_if_buy_up < CONFIG.TARGET_PAIR_COST:
             up_signal_type = "STANDARD"
-    elif position and position.down_shares > 0 and position.up_shares == 0:
-        # PAIR COMPLETION: We have Down only - buy Up to complete pair
-        # Even at higher prices (up to MAX_COMPLETION_PRICE) if pair is profitable
+    elif position and position.down_shares > position.up_shares * 1.5:
+        # PAIR COMPLETION: Significantly more Down than Up - buy Up to hedge
+        # Trigger when Down > 1.5x Up shares (hedge ratio < ~40%)
+        # Reference account buys completion sides at $0.66-$0.87
         if market.up_price < CONFIG.MAX_COMPLETION_PRICE:
-            if projected_pair_if_buy_up < CONFIG.TARGET_PAIR_COST:
-                up_signal_type = "PAIR_COMPLETE"
-                logger.info(f"PAIR_COMPLETE {asset}: Buying Up @ ${market.up_price:.3f} to complete pair (proj=${projected_pair_if_buy_up:.3f})")
+            up_signal_type = "PAIR_COMPLETE"
+            logger.info(f"PAIR_COMPLETE {asset}: Buying Up @ ${market.up_price:.3f} to hedge (ratio={position.hedge_ratio:.1%}, down={position.down_shares:.0f} > up={position.up_shares:.0f})")
 
     # ----- CHECK DOWN SIDE -----
     if market.down_price < aggressive_threshold:
@@ -1525,13 +1525,13 @@ async def process_market_signal(market: MarketPrice):
         # STANDARD: Buy moderately cheap if pair cost is good
         if projected_pair_if_buy_down < CONFIG.TARGET_PAIR_COST:
             down_signal_type = "STANDARD"
-    elif position and position.up_shares > 0 and position.down_shares == 0:
-        # PAIR COMPLETION: We have Up only - buy Down to complete pair
-        # Even at higher prices (up to MAX_COMPLETION_PRICE) if pair is profitable
+    elif position and position.up_shares > position.down_shares * 1.5:
+        # PAIR COMPLETION: Significantly more Up than Down - buy Down to hedge
+        # Trigger when Up > 1.5x Down shares (hedge ratio < ~40%)
+        # Reference account buys completion sides at $0.66-$0.87
         if market.down_price < CONFIG.MAX_COMPLETION_PRICE:
-            if projected_pair_if_buy_down < CONFIG.TARGET_PAIR_COST:
-                down_signal_type = "PAIR_COMPLETE"
-                logger.info(f"PAIR_COMPLETE {asset}: Buying Down @ ${market.down_price:.3f} to complete pair (proj=${projected_pair_if_buy_down:.3f})")
+            down_signal_type = "PAIR_COMPLETE"
+            logger.info(f"PAIR_COMPLETE {asset}: Buying Down @ ${market.down_price:.3f} to hedge (ratio={position.hedge_ratio:.1%}, up={position.up_shares:.0f} > down={position.down_shares:.0f})")
 
     detection_ms = (time.perf_counter() - t_detection_start) * 1000
 
