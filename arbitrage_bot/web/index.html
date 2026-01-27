@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arbitrage Live Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .signal-aggressive { animation: pulse-green 1.5s ease-in-out infinite; }
+        .signal-standard { animation: pulse-blue 1.5s ease-in-out infinite; }
+        @keyframes pulse-green {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); }
+        }
+        @keyframes pulse-blue {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
+        }
+        .profit { color: #22c55e; }
+        .loss { color: #ef4444; }
+        .latency-good { color: #22c55e; }
+        .latency-ok { color: #eab308; }
+        .latency-bad { color: #ef4444; }
+        .pair-cost-good { background: linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(34, 197, 94, 0.1) 100%); border-color: #22c55e; }
+        .pair-cost-ok { background: linear-gradient(135deg, rgba(234, 179, 8, 0.2) 0%, rgba(234, 179, 8, 0.1) 100%); border-color: #eab308; }
+        .pair-cost-bad { background: linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(239, 68, 68, 0.1) 100%); border-color: #ef4444; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <h1 class="text-xl font-bold text-green-400">Arbitrage Live Test</h1>
+                <span class="px-2 py-1 text-xs rounded-full bg-orange-600 text-white">LIVE DATA</span>
+                <span id="connection-status" class="px-2 py-1 text-xs rounded-full bg-gray-600">
+                    Connecting...
+                </span>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span id="last-update" class="text-sm text-gray-400">--</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-6 py-8">
+        <!-- Latency Stats Bar -->
+        <div class="bg-gray-800 rounded-lg p-4 border border-blue-700 mb-6">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-blue-400">Speed Metrics</h2>
+                <div class="flex items-center space-x-6 text-sm">
+                    <div class="text-center">
+                        <div class="text-gray-400">Detection</div>
+                        <div id="latency-detection" class="text-lg font-bold latency-good">--ms</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-gray-400">Validation</div>
+                        <div id="latency-validation" class="text-lg font-bold latency-good">--ms</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-gray-400">Order Build</div>
+                        <div id="latency-order-build" class="text-lg font-bold latency-good">--ms</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-gray-400">Submission</div>
+                        <div id="latency-submission" class="text-lg font-bold latency-ok">--ms</div>
+                    </div>
+                    <div class="text-center border-l border-gray-600 pl-6">
+                        <div class="text-gray-400">E2E Total</div>
+                        <div id="latency-e2e" class="text-2xl font-bold text-white">--ms</div>
+                    </div>
+                    <div class="text-center border-l border-gray-600 pl-6">
+                        <div class="text-gray-400">Orders</div>
+                        <div id="orders-count" class="text-lg font-bold">0</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-gray-400">Rejected</div>
+                        <div id="orders-rejected" class="text-lg font-bold text-red-400">0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Account Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-gray-400 text-sm font-medium mb-2">Balance</h3>
+                <p id="balance" class="text-2xl font-bold text-green-400">$1,000.00</p>
+                <p id="starting-balance" class="text-sm text-gray-400 mt-1">Started: $1,000.00</p>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-gray-400 text-sm font-medium mb-2">Open Exposure</h3>
+                <p id="open-exposure" class="text-2xl font-bold">$0.00</p>
+                <p id="open-positions-count" class="text-sm text-gray-400 mt-1">0 positions</p>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-gray-400 text-sm font-medium mb-2">Markets Found</h3>
+                <p id="markets-found" class="text-2xl font-bold">0</p>
+                <p id="markets-status" class="text-sm text-gray-400 mt-1">Searching...</p>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-gray-400 text-sm font-medium mb-2">Signals Detected</h3>
+                <p id="signals-detected" class="text-2xl font-bold text-blue-400">0</p>
+                <p id="signals-breakdown" class="text-sm text-gray-400 mt-1">-- agg / -- std</p>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-gray-400 text-sm font-medium mb-2">Order Attempts</h3>
+                <p id="total-orders" class="text-2xl font-bold">0</p>
+                <p id="success-rate" class="text-sm text-gray-400 mt-1">0% success</p>
+            </div>
+        </div>
+
+        <!-- Control Panel -->
+        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-8">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold">Control Panel</h2>
+                <div id="trading-status" class="flex items-center space-x-2">
+                    <span class="w-3 h-3 rounded-full bg-gray-500" id="status-indicator"></span>
+                    <span id="status-text" class="text-sm text-gray-400">Stopped</span>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-4">
+                <button id="start-btn" onclick="startTrading()" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded font-medium disabled:opacity-50">
+                    Start Live Test
+                </button>
+                <button id="stop-btn" onclick="stopTrading()" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded font-medium disabled:opacity-50" disabled>
+                    Stop
+                </button>
+                <button id="reset-btn" onclick="resetAccount()" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded font-medium">
+                    Reset
+                </button>
+            </div>
+            <div class="mt-6 pt-4 border-t border-gray-700">
+                <h3 class="text-sm font-medium text-gray-300 mb-3">Strategy Parameters (Optimized)</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                        <label class="block text-gray-400 mb-1">Aggressive ($)</label>
+                        <input type="number" id="cfg-aggressive" value="0.25" step="0.01" min="0.05" max="0.40"
+                            class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 mb-1">Standard ($)</label>
+                        <input type="number" id="cfg-standard" value="0.35" step="0.01" min="0.10" max="0.50"
+                            class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 mb-1">Target Pair</label>
+                        <input type="number" id="cfg-target-pair" value="0.95" step="0.01" min="0.80" max="0.99"
+                            class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 mb-1">Max Pair</label>
+                        <input type="number" id="cfg-max-pair" value="0.98" step="0.01" min="0.85" max="1.00"
+                            class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-center">
+                    </div>
+                </div>
+                <button onclick="updateConfig()" class="mt-3 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm">
+                    Update Config
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="lg:col-span-2 space-y-8">
+                <!-- Active Markets -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700">
+                    <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                        <h2 class="text-lg font-semibold">Active Markets (Live)</h2>
+                        <span id="markets-count" class="text-sm text-gray-400">0 markets</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-750">
+                                <tr class="text-left text-sm text-gray-400">
+                                    <th class="px-6 py-3">Market</th>
+                                    <th class="px-6 py-3 text-center">Up</th>
+                                    <th class="px-6 py-3 text-center">Down</th>
+                                    <th class="px-6 py-3 text-center">Pair</th>
+                                    <th class="px-6 py-3 text-center">Signal</th>
+                                </tr>
+                            </thead>
+                            <tbody id="markets-table" class="divide-y divide-gray-700">
+                                <tr><td colspan="5" class="px-6 py-8 text-center text-gray-500">Searching...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Recent Order Attempts -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700">
+                    <div class="px-6 py-4 border-b border-gray-700">
+                        <h2 class="text-lg font-semibold">Recent Order Attempts</h2>
+                    </div>
+                    <div class="overflow-x-auto max-h-80 overflow-y-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-750 sticky top-0">
+                                <tr class="text-left text-sm text-gray-400">
+                                    <th class="px-4 py-3">Time</th>
+                                    <th class="px-4 py-3">Market</th>
+                                    <th class="px-4 py-3 text-center">Side</th>
+                                    <th class="px-4 py-3 text-center">Price</th>
+                                    <th class="px-4 py-3 text-center">E2E</th>
+                                    <th class="px-4 py-3 text-center">Submit</th>
+                                    <th class="px-4 py-3 text-center">Result</th>
+                                </tr>
+                            </thead>
+                            <tbody id="orders-table" class="divide-y divide-gray-700">
+                                <tr><td colspan="7" class="px-6 py-8 text-center text-gray-500">No orders yet</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Open Positions -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700">
+                    <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                        <h2 class="text-lg font-semibold">Open Positions (Paper)</h2>
+                        <span id="positions-value" class="text-sm text-gray-400">$0.00</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-750">
+                                <tr class="text-left text-sm text-gray-400">
+                                    <th class="px-6 py-3">Market</th>
+                                    <th class="px-6 py-3 text-center">Up</th>
+                                    <th class="px-6 py-3 text-center">Down</th>
+                                    <th class="px-6 py-3 text-center">Pair</th>
+                                    <th class="px-6 py-3 text-center">Hedge</th>
+                                    <th class="px-6 py-3 text-center">P&L</th>
+                                </tr>
+                            </thead>
+                            <tbody id="positions-table" class="divide-y divide-gray-700">
+                                <tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">No positions</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-8">
+                <!-- Latency Breakdown -->
+                <div class="bg-gray-800 rounded-lg border border-blue-700 p-6">
+                    <h2 class="text-lg font-semibold mb-4 text-blue-400">Latency Breakdown</h2>
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-400">Detection</span>
+                            <div><span id="lat-detection-avg" class="font-medium">--</span><span class="text-xs text-gray-500 ml-1">avg</span><span class="text-xs text-gray-400 ml-2">p95:</span><span id="lat-detection-p95" class="text-xs">--</span></div>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-400">Validation</span>
+                            <div><span id="lat-validation-avg" class="font-medium">--</span><span class="text-xs text-gray-500 ml-1">avg</span><span class="text-xs text-gray-400 ml-2">p95:</span><span id="lat-validation-p95" class="text-xs">--</span></div>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-400">Order Build</span>
+                            <div><span id="lat-build-avg" class="font-medium">--</span><span class="text-xs text-gray-500 ml-1">avg</span><span class="text-xs text-gray-400 ml-2">p95:</span><span id="lat-build-p95" class="text-xs">--</span></div>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-400">Submission</span>
+                            <div><span id="lat-submission-avg" class="font-medium">--</span><span class="text-xs text-gray-500 ml-1">avg</span><span class="text-xs text-gray-400 ml-2">p95:</span><span id="lat-submission-p95" class="text-xs">--</span></div>
+                        </div>
+                        <div class="flex justify-between items-center pt-3 border-t border-gray-700">
+                            <span class="text-white font-medium">E2E Total</span>
+                            <div><span id="lat-e2e-avg" class="font-bold text-lg">--</span><span class="text-xs text-gray-500 ml-1">avg</span><span class="text-xs text-gray-400 ml-2">p95:</span><span id="lat-e2e-p95" class="text-xs">--</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Signals -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700">
+                    <div class="px-6 py-4 border-b border-gray-700"><h2 class="text-lg font-semibold">Recent Signals</h2></div>
+                    <div id="signals-list" class="divide-y divide-gray-700 max-h-80 overflow-y-auto">
+                        <div class="px-6 py-8 text-center text-gray-500">No signals</div>
+                    </div>
+                </div>
+
+                <!-- Strategy Reference -->
+                <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                    <h2 class="text-lg font-semibold mb-4">Strategy Reference</h2>
+                    <div class="space-y-4 text-sm">
+                        <div class="p-3 bg-green-900/30 border border-green-700 rounded">
+                            <div class="font-medium text-green-400 mb-1">AGGRESSIVE</div>
+                            <div class="text-gray-400">Price &lt; $0.25 - Always buy</div>
+                        </div>
+                        <div class="p-3 bg-blue-900/30 border border-blue-700 rounded">
+                            <div class="font-medium text-blue-400 mb-1">STANDARD</div>
+                            <div class="text-gray-400">Price &lt; $0.35 if pair &lt; $0.95</div>
+                        </div>
+                        <div class="p-3 bg-gray-700 rounded">
+                            <div class="font-medium text-gray-300 mb-2">Targets</div>
+                            <div class="grid grid-cols-2 gap-2 text-gray-400">
+                                <div>Pair: &lt;$0.98</div>
+                                <div>Hedge: &gt;70%</div>
+                                <div>Max: $0.50</div>
+                                <div>Profit: 2-5%</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="fixed bottom-4 right-4 space-y-2 z-50"></div>
+
+    <script>
+        let ws = null;
+        let wsReconnectAttempts = 0;
+        let state = { account: {}, markets: {}, signals: [], orders: [], latency: {}, config: {} };
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/arbitrage/ws`;
+            updateConnectionStatus('connecting');
+            try {
+                ws = new WebSocket(wsUrl);
+                ws.onopen = () => { wsReconnectAttempts = 0; updateConnectionStatus('connected'); };
+                ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
+                ws.onclose = () => { updateConnectionStatus('disconnected'); scheduleReconnect(); };
+                ws.onerror = () => updateConnectionStatus('error');
+            } catch (e) { scheduleReconnect(); }
+        }
+
+        function scheduleReconnect() {
+            if (wsReconnectAttempts < 10) {
+                wsReconnectAttempts++;
+                setTimeout(connectWebSocket, 1000 * Math.pow(2, wsReconnectAttempts - 1));
+            }
+        }
+
+        function handleMessage(data) {
+            if (data.timestamp) document.getElementById('last-update').textContent = new Date(data.timestamp).toLocaleTimeString();
+            if (data.type === 'connected' || data.type === 'state_update') {
+                state.account = data.account || state.account;
+                state.markets = data.markets || state.markets;
+                state.config = data.config || state.config;
+                state.latency = data.latency || state.latency;
+                state.signals = data.recent_signals || state.signals;
+                state.orders = data.recent_orders || state.orders;
+                updateUI();
+            }
+        }
+
+        function updateConnectionStatus(status) {
+            const el = document.getElementById('connection-status');
+            const classes = { connecting: 'bg-yellow-600', connected: 'bg-green-600', disconnected: 'bg-red-600', error: 'bg-red-600' };
+            el.className = `px-2 py-1 text-xs rounded-full ${classes[status] || 'bg-gray-600'}`;
+            el.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        }
+
+        function updateUI() {
+            const acct = state.account, lat = state.latency;
+            document.getElementById('balance').textContent = `$${(acct.balance || 0).toFixed(2)}`;
+            document.getElementById('starting-balance').textContent = `Started: $${(acct.starting_balance || 0).toFixed(2)}`;
+            document.getElementById('open-exposure').textContent = `$${(acct.open_exposure || 0).toFixed(2)}`;
+            document.getElementById('open-positions-count').textContent = `${acct.open_positions || 0} positions`;
+            const mc = Object.keys(state.markets).length;
+            document.getElementById('markets-found').textContent = mc;
+            document.getElementById('markets-status').textContent = mc > 0 ? 'Live' : 'Searching...';
+            document.getElementById('signals-detected').textContent = lat.signals_detected || 0;
+            document.getElementById('total-orders').textContent = lat.orders_attempted || 0;
+            document.getElementById('orders-rejected').textContent = lat.orders_rejected || 0;
+            document.getElementById('success-rate').textContent = `${(lat.success_rate || 0).toFixed(0)}% success`;
+            document.getElementById('orders-count').textContent = lat.orders_attempted || 0;
+            updateLatency(); updateMarketsTable(); updateOrdersTable(); updatePositionsTable(); updateSignalsList(); updateTradingStatus();
+        }
+
+        function updateLatency() {
+            const lat = state.latency;
+            if (!lat || !lat.e2e) return;
+            const setL = (id, data, t) => {
+                const el = document.getElementById(id);
+                if (!data || data.count === 0) { el.textContent = '--ms'; return; }
+                el.textContent = `${data.avg.toFixed(0)}ms`;
+                el.className = 'text-lg font-bold ' + (data.avg < t[0] ? 'latency-good' : data.avg < t[1] ? 'latency-ok' : 'latency-bad');
+            };
+            setL('latency-detection', lat.detection, [5, 20]);
+            setL('latency-validation', lat.validation, [5, 20]);
+            setL('latency-order-build', lat.order_build, [5, 20]);
+            setL('latency-submission', lat.submission, [200, 500]);
+            if (lat.e2e && lat.e2e.count > 0) document.getElementById('latency-e2e').textContent = `${lat.e2e.avg.toFixed(0)}ms`;
+            const setB = (p, d) => { if (!d || d.count === 0) return; document.getElementById(`lat-${p}-avg`).textContent = `${d.avg.toFixed(1)}ms`; document.getElementById(`lat-${p}-p95`).textContent = `${d.p95.toFixed(0)}ms`; };
+            setB('detection', lat.detection); setB('validation', lat.validation); setB('build', lat.order_build); setB('submission', lat.submission); setB('e2e', lat.e2e);
+        }
+
+        function updateMarketsTable() {
+            const tbody = document.getElementById('markets-table');
+            const markets = Object.values(state.markets);
+            document.getElementById('markets-count').textContent = `${markets.length} markets`;
+            if (markets.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-gray-500">Searching...</td></tr>'; return; }
+            tbody.innerHTML = markets.map(m => {
+                const pc = m.pair_cost || (m.up_price + m.down_price);
+                const pcC = pc < 0.95 ? 'text-green-400' : pc < 0.98 ? 'text-yellow-400' : 'text-red-400';
+                const cfg = state.config;
+                const upS = m.up_price < (cfg.AGGRESSIVE_BUY_THRESHOLD || 0.25) ? 'AGGRESSIVE' : m.up_price < (cfg.STANDARD_BUY_THRESHOLD || 0.35) ? 'STANDARD' : '';
+                const dnS = m.down_price < (cfg.AGGRESSIVE_BUY_THRESHOLD || 0.25) ? 'AGGRESSIVE' : m.down_price < (cfg.STANDARD_BUY_THRESHOLD || 0.35) ? 'STANDARD' : '';
+                let sig = '';
+                if (upS || dnS) { const s = upS || dnS; const sc = s === 'AGGRESSIVE' ? 'bg-green-600 signal-aggressive' : 'bg-blue-600 signal-standard'; const sd = upS ? 'UP' : 'DN'; sig = `<span class="px-2 py-1 text-xs rounded ${sc}">${sd}</span>`; }
+                return `<tr class="hover:bg-gray-750"><td class="px-6 py-3 text-sm">${(m.title || m.slug || '?').substring(0, 30)}...</td><td class="px-6 py-3 text-center ${m.up_price < 0.35 ? 'text-green-400 font-medium' : ''}">$${m.up_price.toFixed(3)}</td><td class="px-6 py-3 text-center ${m.down_price < 0.35 ? 'text-green-400 font-medium' : ''}">$${m.down_price.toFixed(3)}</td><td class="px-6 py-3 text-center ${pcC} font-medium">$${pc.toFixed(3)}</td><td class="px-6 py-3 text-center">${sig || '-'}</td></tr>`;
+            }).join('');
+        }
+
+        function updateOrdersTable() {
+            const tbody = document.getElementById('orders-table');
+            const orders = state.orders || [];
+            if (orders.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="px-6 py-8 text-center text-gray-500">No orders yet</td></tr>'; return; }
+            tbody.innerHTML = orders.slice().reverse().map(o => {
+                const t = new Date(o.timestamp).toLocaleTimeString();
+                const sc = o.outcome === 'Up' ? 'text-green-400' : 'text-red-400';
+                const rc = o.success ? 'text-green-400' : 'text-yellow-400';
+                const rt = o.success ? 'OK' : (o.error_message || 'Rejected').substring(0, 15);
+                return `<tr class="hover:bg-gray-750 text-sm"><td class="px-4 py-2 text-gray-400">${t}</td><td class="px-4 py-2">${(o.market_title || '').substring(0, 18)}...</td><td class="px-4 py-2 text-center ${sc} font-medium">${o.outcome}</td><td class="px-4 py-2 text-center">$${(o.price || 0).toFixed(3)}</td><td class="px-4 py-2 text-center font-medium">${(o.e2e_ms || 0).toFixed(0)}ms</td><td class="px-4 py-2 text-center">${(o.submission_ms || 0).toFixed(0)}ms</td><td class="px-4 py-2 text-center ${rc}">${rt}</td></tr>`;
+            }).join('');
+        }
+
+        function updatePositionsTable() {
+            const tbody = document.getElementById('positions-table');
+            const positions = state.account.positions ? Object.values(state.account.positions) : [];
+            const tv = positions.reduce((s, p) => s + (p.total_cost || 0), 0);
+            document.getElementById('positions-value').textContent = `$${tv.toFixed(2)}`;
+            if (positions.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">No positions</td></tr>'; return; }
+            tbody.innerHTML = positions.map(p => {
+                const pc = p.pair_cost || 0;
+                const pcC = pc < 0.95 ? 'pair-cost-good' : pc < 0.98 ? 'pair-cost-ok' : 'pair-cost-bad';
+                const hr = (p.hedge_ratio || 0) * 100;
+                const pnl = p.theoretical_profit || 0;
+                return `<tr class="hover:bg-gray-750"><td class="px-6 py-3 text-sm">${(p.market_title || '?').substring(0, 25)}...</td><td class="px-6 py-3 text-center"><div>${(p.up_shares || 0).toFixed(1)}</div><div class="text-xs text-gray-400">@ $${(p.up_avg_price || 0).toFixed(3)}</div></td><td class="px-6 py-3 text-center"><div>${(p.down_shares || 0).toFixed(1)}</div><div class="text-xs text-gray-400">@ $${(p.down_avg_price || 0).toFixed(3)}</div></td><td class="px-6 py-3 text-center"><span class="px-2 py-1 rounded ${pcC}">$${pc.toFixed(3)}</span></td><td class="px-6 py-3 text-center ${hr >= 70 ? 'text-green-400' : 'text-yellow-400'}">${hr.toFixed(0)}%</td><td class="px-6 py-3 text-center font-medium ${pnl >= 0 ? 'profit' : 'loss'}">$${pnl.toFixed(2)}</td></tr>`;
+            }).join('');
+        }
+
+        function updateSignalsList() {
+            const container = document.getElementById('signals-list');
+            const signals = state.signals.slice(-12).reverse();
+            if (signals.length === 0) { container.innerHTML = '<div class="px-6 py-8 text-center text-gray-500">No signals</div>'; return; }
+            container.innerHTML = signals.map(s => {
+                const t = new Date(s.timestamp).toLocaleTimeString();
+                const isE = s.action === 'BUY';
+                const tc = s.signal_type === 'AGGRESSIVE' ? 'bg-green-600' : s.signal_type === 'STANDARD' ? 'bg-blue-600' : 'bg-gray-600';
+                const bc = isE ? 'border-l-green-500' : 'border-l-gray-600';
+                return `<div class="px-4 py-3 border-l-4 ${bc}"><div class="flex items-center justify-between mb-1"><span class="text-xs text-gray-400">${t}</span><div class="flex items-center space-x-2"><span class="text-xs text-gray-400">${s.latency_ms.toFixed(1)}ms</span>${s.signal_type ? `<span class="px-2 py-0.5 text-xs rounded ${tc}">${s.signal_type}</span>` : ''}</div></div><div class="text-sm font-medium ${isE ? 'text-green-400' : 'text-gray-400'}">${s.action} ${s.outcome} @ $${(s.price || 0).toFixed(3)}</div><div class="text-xs text-gray-500 mt-1">${s.reason || ''}</div></div>`;
+            }).join('');
+        }
+
+        function updateTradingStatus() {
+            const ind = document.getElementById('status-indicator');
+            const txt = document.getElementById('status-text');
+            const stB = document.getElementById('start-btn');
+            const spB = document.getElementById('stop-btn');
+            const isR = Object.keys(state.markets).length > 0 || (state.latency && state.latency.orders_attempted > 0);
+            if (isR) { ind.className = 'w-3 h-3 rounded-full bg-green-500'; txt.textContent = 'Running'; txt.className = 'text-sm text-green-400'; stB.disabled = true; spB.disabled = false; }
+            else { ind.className = 'w-3 h-3 rounded-full bg-gray-500'; txt.textContent = 'Stopped'; txt.className = 'text-sm text-gray-400'; stB.disabled = false; spB.disabled = true; }
+        }
+
+        async function startTrading() { try { await fetch('/arbitrage/api/start', { method: 'POST' }); showToast('success', 'Started'); } catch (e) { showToast('error', 'Failed'); } }
+        async function stopTrading() { try { await fetch('/arbitrage/api/stop', { method: 'POST' }); showToast('info', 'Stopped'); } catch (e) { showToast('error', 'Failed'); } }
+        async function resetAccount() { if (!confirm('Reset all data?')) return; try { await fetch('/arbitrage/api/reset', { method: 'POST' }); showToast('success', 'Reset'); } catch (e) { showToast('error', 'Failed'); } }
+        async function updateConfig() {
+            const cfg = { AGGRESSIVE_BUY_THRESHOLD: parseFloat(document.getElementById('cfg-aggressive').value), STANDARD_BUY_THRESHOLD: parseFloat(document.getElementById('cfg-standard').value), TARGET_PAIR_COST: parseFloat(document.getElementById('cfg-target-pair').value), MAX_PAIR_COST: parseFloat(document.getElementById('cfg-max-pair').value) };
+            try { const r = await fetch('/arbitrage/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) }); const d = await r.json(); state.config = d.config || state.config; showToast('success', 'Updated'); } catch (e) { showToast('error', 'Failed'); }
+        }
+
+        function showToast(type, msg) {
+            const c = document.getElementById('toast-container');
+            const colors = { success: 'bg-green-600', error: 'bg-red-600', warning: 'bg-yellow-600', info: 'bg-blue-600' };
+            const t = document.createElement('div');
+            t.className = `px-4 py-3 rounded shadow-lg ${colors[type] || colors.info} text-white`;
+            t.textContent = msg;
+            c.appendChild(t);
+            setTimeout(() => t.remove(), 3000);
+        }
+
+        setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping'); }, 25000);
+        document.addEventListener('DOMContentLoaded', connectWebSocket);
+    </script>
+</body>
+</html>
