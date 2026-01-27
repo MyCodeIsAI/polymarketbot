@@ -58,9 +58,24 @@ class TradeEvent:
     @classmethod
     def from_websocket(cls, data: dict) -> "TradeEvent":
         """Parse from WebSocket message."""
+        # Parse timestamp - can be ISO string or epoch milliseconds
+        ts_raw = data.get("timestamp")
+        if isinstance(ts_raw, (int, float)):
+            # Epoch milliseconds
+            timestamp = datetime.utcfromtimestamp(ts_raw / 1000)
+        elif isinstance(ts_raw, str):
+            # Check if it's a numeric string (epoch ms)
+            if ts_raw.isdigit():
+                timestamp = datetime.utcfromtimestamp(int(ts_raw) / 1000)
+            else:
+                # ISO format string
+                timestamp = datetime.fromisoformat(ts_raw.replace("Z", ""))
+        else:
+            timestamp = datetime.utcnow()
+
         return cls(
             trade_id=data.get("id", ""),
-            timestamp=datetime.fromisoformat(data.get("timestamp", datetime.utcnow().isoformat())),
+            timestamp=timestamp,
             wallet_address=data.get("maker", data.get("taker", "")),
             market_id=data.get("market", data.get("condition_id", "")),
             market_title=data.get("market_title", ""),
@@ -318,17 +333,15 @@ class RealTimeMonitor:
             self._data_client = DataAPIClient()
             await self._data_client.__aenter__()
 
-        # Try WebSocket first
-        ws_connected = await self._start_websocket()
+        # CRITICAL: Always populate market info cache BEFORE starting any mode
+        # This ensures trades are scored with proper category context
+        await self._get_high_risk_token_ids()
 
-        if ws_connected:
-            self._state = MonitorState.RUNNING
-            logger.info("monitor_started", mode="websocket")
-        else:
-            # Fallback to polling
-            self._state = MonitorState.DEGRADED
-            self._start_polling()
-            logger.info("monitor_started", mode="polling")
+        # Always start polling - it's reliable and works with the Data API
+        # WebSocket with Polymarket often returns INVALID OPERATION errors
+        self._state = MonitorState.RUNNING
+        self._start_polling()
+        logger.info("monitor_started", mode="polling")
 
         # Start cleanup task
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
@@ -471,6 +484,14 @@ class RealTimeMonitor:
                                 market_id = market.get("conditionId", "")
                                 clob_tokens = market.get("clobTokenIds", [])
 
+                                # Handle clobTokenIds being a JSON string instead of list
+                                if isinstance(clob_tokens, str):
+                                    import json as json_lib
+                                    try:
+                                        clob_tokens = json_lib.loads(clob_tokens)
+                                    except (json_lib.JSONDecodeError, ValueError):
+                                        clob_tokens = []
+
                                 # Prioritize high-risk categories
                                 if is_high_risk:
                                     high_risk_tokens.extend(clob_tokens)
@@ -530,9 +551,11 @@ class RealTimeMonitor:
         if any(kw in combined for kw in ["earnings", "stock", "company", "ceo", "merger", "acquisition", "ipo"]):
             return MarketCategory.CORPORATE
         if any(kw in combined for kw in ["bitcoin", "ethereum", "crypto", "token", "defi", "nft"]):
-            return MarketCategory.CRYPTO
+            return MarketCategory.TECH_LAUNCH  # Crypto -> TECH_LAUNCH (closest category)
         if any(kw in combined for kw in ["nfl", "nba", "mlb", "sports", "game", "match", "championship"]):
             return MarketCategory.SPORTS
+        if any(kw in combined for kw in ["oscar", "emmy", "grammy", "award", "nomination"]):
+            return MarketCategory.AWARDS
 
         return None
 
@@ -602,6 +625,85 @@ class RealTimeMonitor:
             MarketInfo if cached, None otherwise
         """
         return self._market_info.get(market_id)
+
+    async def _fetch_market_info(self, market_id: str, market_title: str = "") -> Optional[MarketInfo]:
+        """Fetch and cache market info on-demand for unknown markets.
+
+        Called when a trade comes in for a market not in our cache.
+
+        Args:
+            market_id: Market condition ID
+            market_title: Market title from trade (for category detection)
+
+        Returns:
+            MarketInfo if fetched, None on error
+        """
+        import httpx
+
+        # Check cache first
+        if market_id in self._market_info:
+            return self._market_info[market_id]
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Try to get market info from Gamma API
+                response = await client.get(
+                    f"{self.GAMMA_API_BASE}/markets/{market_id}",
+                )
+
+                if response.status_code == 200:
+                    market_data = response.json()
+                    end_date = None
+                    if market_data.get("endDate"):
+                        try:
+                            end_date = datetime.fromisoformat(
+                                market_data["endDate"].replace("Z", "")
+                            )
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Build event-like dict for category detection
+                    fake_event = {
+                        "title": market_data.get("question", market_title),
+                        "tags": market_data.get("tags", []),
+                        "slug": market_data.get("slug", ""),
+                    }
+                    category = self._detect_category(fake_event)
+
+                    info = MarketInfo(
+                        market_id=market_id,
+                        title=market_data.get("question", market_title),
+                        end_date=end_date,
+                        category=category,
+                        fetched_at=datetime.utcnow(),
+                    )
+                    self._market_info[market_id] = info
+                    logger.debug(
+                        "market_info_fetched_ondemand",
+                        market_id=market_id[:20] + "...",
+                        category=category.value if category else None,
+                    )
+                    return info
+
+        except Exception as e:
+            logger.debug("market_info_fetch_error", market_id=market_id[:20] + "...", error=str(e))
+
+        # Fallback: Try to detect category from title alone
+        if market_title:
+            fake_event = {"title": market_title, "tags": [], "slug": ""}
+            category = self._detect_category(fake_event)
+            if category:
+                info = MarketInfo(
+                    market_id=market_id,
+                    title=market_title,
+                    end_date=None,
+                    category=category,
+                    fetched_at=datetime.utcnow(),
+                )
+                self._market_info[market_id] = info
+                return info
+
+        return None
 
     def _start_polling(self) -> None:
         """Start polling fallback."""
@@ -868,13 +970,25 @@ class RealTimeMonitor:
         # ENRICHMENT 1: Wallet profile (account age, tx count)
         # ================================================================
         profile = await self._enrich_wallet(wallet_address)
-        account_age_days = profile.account_age_days if profile else None
+        # Only trust account_age_days if we fetched all activity (not truncated)
+        # Otherwise, we may have only recent trades and incorrect first_seen
+        if profile and not profile.activity_truncated:
+            account_age_days = profile.account_age_days
+        else:
+            account_age_days = None  # Don't penalize when age is unreliable
         transaction_count = profile.transaction_count if profile else None
 
         # ================================================================
         # ENRICHMENT 2: Market info (actual resolution time, category)
         # ================================================================
         market_info = self._get_market_info(accumulation.market_id)
+
+        # Fetch on-demand if not in cache
+        if not market_info and accumulation.market_id:
+            market_info = await self._fetch_market_info(
+                accumulation.market_id,
+                accumulation.market_title,
+            )
 
         # Calculate ACTUAL hours until market resolution (not accumulation time)
         event_hours_away = None
@@ -1056,13 +1170,26 @@ class RealTimeMonitor:
                 logger.error("alert_callback_error", error=str(e))
 
     async def _cleanup_loop(self) -> None:
-        """Periodically clean up old accumulation data."""
+        """Periodically clean up old accumulation data and refresh market cache."""
         cleanup_interval = 3600  # 1 hour
+        market_refresh_interval = 300  # 5 minutes - refresh market info cache
+        last_market_refresh = datetime.utcnow()
 
         while self._should_run:
             try:
-                await asyncio.sleep(cleanup_interval)
-                await self._cleanup_old_data()
+                await asyncio.sleep(60)  # Check every minute
+                now = datetime.utcnow()
+
+                # Refresh market info cache every 5 minutes
+                if (now - last_market_refresh).total_seconds() >= market_refresh_interval:
+                    await self._get_high_risk_token_ids()
+                    last_market_refresh = now
+                    logger.debug("market_cache_refreshed", markets=len(self._market_info))
+
+                # Cleanup old data every hour
+                if (now - self.stats.started_at).total_seconds() % cleanup_interval < 60:
+                    await self._cleanup_old_data()
+
             except asyncio.CancelledError:
                 break
             except Exception as e:

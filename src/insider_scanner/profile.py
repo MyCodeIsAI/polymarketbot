@@ -65,6 +65,7 @@ class WalletProfile:
     last_activity: Optional[datetime] = None
     account_age_days: int = 0
     transaction_count: int = 0
+    activity_truncated: bool = False  # True if we hit activity limit and can't trust first_seen
 
     # Position metrics
     total_positions: int = 0
@@ -177,7 +178,7 @@ class ProfileFetcher:
         # Fetch activity
         if include_activity:
             activities = await self._fetch_activity(wallet_address, limit=activity_limit)
-            self._process_activity(profile, activities)
+            self._process_activity(profile, activities, activity_limit=activity_limit)
 
         # Calculate derived metrics
         self._calculate_metrics(profile)
@@ -357,12 +358,23 @@ class ProfileFetcher:
         self,
         profile: WalletProfile,
         activities: list[Activity],
+        activity_limit: int = 500,
     ) -> None:
         """Process activity data into profile."""
         profile.activities = activities
 
         if not activities:
             return
+
+        # Check if we hit the activity limit - if so, we can't trust first_seen
+        if len(activities) >= activity_limit:
+            profile.activity_truncated = True
+            logger.debug(
+                "activity_truncated",
+                wallet=profile.wallet_address[:10] + "...",
+                activity_count=len(activities),
+                limit=activity_limit,
+            )
 
         # Track first and last activity
         timestamps = [a.timestamp for a in activities]

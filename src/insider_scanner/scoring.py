@@ -382,6 +382,15 @@ class InsiderScorer:
                     raw_value=avg_odds,
                     description=f"Average entry odds {avg_odds*100:.1f}%"
                 ))
+            elif odds_score < 0:
+                # Negative signal for extreme high odds - NOT insider behavior
+                signals.append(Signal(
+                    name="extreme_high_odds",
+                    category="trading",
+                    weight=odds_score,
+                    raw_value=avg_odds,
+                    description=f"Entry at {avg_odds*100:.1f}% odds (no information edge)"
+                ))
 
         # Win rate score
         win_rate = self._calculate_win_rate(positions)
@@ -505,6 +514,11 @@ class InsiderScorer:
         The 10-30% range is the "insider sweet spot" - low enough to be
         profitable but not so extreme it's obvious. Increased scoring
         for this range based on Fed Chair cluster analysis (Jan 2026).
+
+        IMPORTANT: Extreme high odds (>85%) get NEGATIVE scores because:
+        - No insider would bet at 99% odds to make 1% profit
+        - Buying near-certainties indicates no information edge
+        - Real insiders bet on the UNDERVALUED side, not the obvious favorite
         """
         if odds < 0.05:
             return 8  # Extreme longshot
@@ -518,8 +532,16 @@ class InsiderScorer:
             return 2  # Moderate
         elif odds < 0.60:
             return 1  # Consensus (variance allowance for GayPride case)
+        elif odds < 0.85:
+            return 0  # High probability - neutral
+        elif odds < 0.90:
+            return -5  # Very high odds - slight negative (likely yield farming)
+        elif odds < 0.95:
+            return -10  # Extreme odds - no insider would bet here
+        elif odds < 0.99:
+            return -15  # Near-certain - definitely not insider behavior
         else:
-            return 0  # High probability
+            return -20  # Certain outcome - zero information edge possible
 
     def _calculate_win_rate(self, positions: List[Dict]) -> Optional[float]:
         """Calculate win rate from resolved positions."""

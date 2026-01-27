@@ -1146,6 +1146,7 @@
                         <td>
                             <div class="table-actions">
                                 <button onclick="viewWallet(${w.id})">View</button>
+                                <button onclick="window.open('https://polymarket.com/profile/${w.wallet_address}', '_blank')" title="View on Polymarket">PM</button>
                                 <button class="btn-probe" onclick="autoProbeWallet('${w.wallet_address}')" title="Probe & add to documented insiders">Probe</button>
                             </div>
                         </td>
@@ -1733,7 +1734,10 @@
                         </div>
                     ` : ''}
 
-                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border);">
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); display: flex; gap: 10px;">
+                        <button class="btn" onclick="window.open('https://polymarket.com/profile/${wallet.wallet_address}', '_blank')">
+                            View on Polymarket
+                        </button>
                         <button class="btn btn-warning" onclick="autoProbeWallet('${wallet.wallet_address}'); closeModal('walletDetailModal');">
                             Probe & Add to Documented Insiders
                         </button>
