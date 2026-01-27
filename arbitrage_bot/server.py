@@ -73,9 +73,9 @@ class Config:
     MAX_COMPLETION_PRICE: float = 0.75      # Max price to pay when completing a pair
     TARGET_PAIR_COST: float = 0.97          # Target pair cost for profitability (after fees)
 
-    # Dynamic thresholds by time-to-resolution (from 17k trade analysis)
-    # Key insight: Prices drop 32% closer to resolution, more opportunities appear
-    DYNAMIC_THRESHOLDS: bool = True  # Enable time-based threshold adjustment
+    # Dynamic thresholds - DISABLED to match profitable account exactly
+    # The profitable account (0x93c22116) used fixed thresholds, not time-based
+    DYNAMIC_THRESHOLDS: bool = False  # Disabled - use fixed thresholds from profitable account
     THRESHOLDS_BY_TIME = {
         # (min_seconds, max_seconds): (aggressive, standard)
         (0, 30): (0.28, 0.38),      # Final 30s: slightly wider (fill risk)
