@@ -1,0 +1,50 @@
+# Polymarket Arbitrage Bot - Systemd Service
+#
+# Installation:
+#   1. Copy to systemd: sudo cp arbitrage_bot.service /etc/systemd/system/
+#   2. Reload daemon:   sudo systemctl daemon-reload
+#   3. Enable service:  sudo systemctl enable arbitrage_bot
+#   4. Start service:   sudo systemctl start arbitrage_bot
+#
+# Commands:
+#   sudo systemctl status arbitrage_bot    # Check status
+#   sudo systemctl restart arbitrage_bot   # Restart
+#   sudo journalctl -u arbitrage_bot -f    # View logs
+
+[Unit]
+Description=Polymarket Arbitrage Bot
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Working directory
+WorkingDirectory=/root/polymarketbot/arbitrage_bot
+
+# Virtual environment and startup
+ExecStart=/root/polymarketbot/venv/bin/python -u server.py --host 0.0.0.0 --port 8769 --auto-start
+
+# Environment variables for live mode (uncomment and fill in for live trading)
+# Environment=POLYMARKET_API_KEY=your_api_key_here
+# Environment=POLYMARKET_API_SECRET=your_api_secret_here
+# Environment=POLYMARKET_PRIVATE_KEY=your_private_key_here
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=append:/var/log/arbitrage_bot.log
+StandardError=append:/var/log/arbitrage_bot.log
+
+# Security
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log /root/polymarketbot/arbitrage_bot
+
+[Install]
+WantedBy=multi-user.target

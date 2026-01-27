@@ -1,0 +1,19 @@
+# Polymarket Arbitrage Bot - Dependencies
+# Install with: pip install -r requirements.txt
+
+# Web framework
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+
+# HTTP client (async)
+httpx>=0.24.0
+
+# WebSocket support
+websockets>=11.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Optional: For live trading mode (requires py-clob-client)
+# Uncomment when ready for live trading:
+# py-clob-client>=0.1.0
