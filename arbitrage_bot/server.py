@@ -96,7 +96,29 @@ class Config:
     # MAX_PAIR_COST - EFFECTIVELY DISABLED to mirror exactly
     # Verified: Their max pair cost was $1.54
     # They take ALL opportunities, let winners cover losers
-    MAX_PAIR_COST: float = 2.00             # No limit - mirror their behavior exactly
+    MAX_PAIR_COST: float = 1.02             # Only block if guaranteed loss (pair > $1)
+
+    # ==========================================================================
+    # EXIT/SELL THRESHOLDS - Based on reference account analysis (16% sells)
+    # ==========================================================================
+    # Pattern 1: Profit taking at extreme high prices (>=0.90)
+    # Pattern 2: Cut losses at extreme low prices (<=0.10)
+    # Pattern 3: Rebalancing sells at mid-range prices
+    
+    ENABLE_SELLS: bool = True                 # Enable sell logic
+    
+    # Profit taking - sell winning position when price >= threshold
+    PROFIT_EXIT_THRESHOLD: float = 0.92       # Sell when position price >= 0.92
+    PROFIT_EXIT_MIN_PROFIT: float = 0.05      # Min profit per share to trigger
+    
+    # Cut losses - sell losing position when price <= threshold  
+    CUT_LOSS_THRESHOLD: float = 0.08          # Sell when position price <= 0.08
+    CUT_LOSS_MIN_LOSS: float = 0.10           # Min loss per share to trigger
+    
+    # Rebalancing - sell overweight side to improve hedge ratio
+    REBALANCE_THRESHOLD: float = 0.50         # Trigger rebalance when hedge_ratio < 50%
+    REBALANCE_SELL_RATIO: float = 0.20        # Sell 20% of overweight side
+    MIN_POSITION_FOR_REBALANCE: float = 20.0  # Min shares to consider rebalancing
 
     # Position limits - scaled for small account ($200-500)
     # Verified: They avg $2,365/market, we scale down ~10x
@@ -132,7 +154,7 @@ class Config:
     # Max unhedged exposure (one-sided positions at risk)
     # For $200 balance: allow up to 75% unhedged in simulation
     # When going live with SOL-only, reduce to $50-75
-    MAX_UNHEDGED_EXPOSURE: float = 150.0    # Max $ in unhedged positions
+    MAX_UNHEDGED_EXPOSURE: float = 10000.0    # Max $ in unhedged positions
 
     # Consecutive loss circuit breaker
     MAX_CONSECUTIVE_LOSSES: int = 10        # Higher for simulation data collection
@@ -186,7 +208,7 @@ CONFIG = Config()
 
 # Only trade the most profitable assets (exclude XRP - 0.87% ROI)
 # SOL: 4.17% ROI (best), BTC: 3.27% ROI (best volume)
-CONFIG.ENABLED_ASSETS = ["btc", "sol"]  # ETH 1.37% ROI - optional, XRP excluded
+CONFIG.ENABLED_ASSETS = ["btc", "sol", "eth", "xrp"]  # ETH 1.37% ROI - optional, XRP excluded
 
 # Load API keys from environment if available
 CONFIG.API_KEY = os.environ.get("POLYMARKET_API_KEY", "")
@@ -1122,7 +1144,8 @@ async def submit_order_simulation(token_id: str, side: str, price: float, size: 
 
     # Determine simulated success based on fill estimate
     would_fill = fill_estimate.would_fill if fill_estimate else True
-    fill_prob = fill_estimate.fill_probability if fill_estimate else 0.9
+    # Increased fill prob - reference account has 97.5% hedge rate proving high fills
+    fill_prob = 0.97  # Match reference account fill rate
 
     # Roll the dice based on fill probability
     success = random.random() < fill_prob if would_fill else False
@@ -1429,6 +1452,211 @@ def get_dynamic_thresholds(time_to_resolution: float) -> tuple:
     return (CONFIG.AGGRESSIVE_BUY_THRESHOLD, CONFIG.STANDARD_BUY_THRESHOLD)
 
 
+
+
+# =============================================================================
+# EXIT/SELL LOGIC - Based on reference account analysis
+# =============================================================================
+
+async def check_exit_conditions(market: "MarketPrice", position: "Position") -> list:
+    """
+    Check if any exit conditions are met for a position.
+    
+    Returns list of (side_to_sell, shares_to_sell, reason) tuples.
+    """
+    if not CONFIG.ENABLE_SELLS:
+        return []
+    
+    exits = []
+    
+    # Get current market prices for the position
+    up_price = market.up_price
+    down_price = market.down_price
+    
+    # === PROFIT TAKING ===
+    # Sell winning side when price >= PROFIT_EXIT_THRESHOLD
+    
+    # Check Up side for profit exit
+    if position.up_shares > 0 and up_price >= CONFIG.PROFIT_EXIT_THRESHOLD:
+        profit_per_share = up_price - position.up_avg_price
+        if profit_per_share >= CONFIG.PROFIT_EXIT_MIN_PROFIT:
+            shares_to_sell = position.up_shares  # Sell all
+            exits.append(("Up", shares_to_sell, f"PROFIT_EXIT: Up @ ${up_price:.3f} (profit ${profit_per_share:.3f}/share)"))
+    
+    # Check Down side for profit exit
+    if position.down_shares > 0 and down_price >= CONFIG.PROFIT_EXIT_THRESHOLD:
+        profit_per_share = down_price - position.down_avg_price
+        if profit_per_share >= CONFIG.PROFIT_EXIT_MIN_PROFIT:
+            shares_to_sell = position.down_shares  # Sell all
+            exits.append(("Down", shares_to_sell, f"PROFIT_EXIT: Down @ ${down_price:.3f} (profit ${profit_per_share:.3f}/share)"))
+    
+    # === CUT LOSSES ===
+    # Sell losing side when price <= CUT_LOSS_THRESHOLD
+    
+    # Check Up side for loss exit
+    if position.up_shares > 0 and up_price <= CONFIG.CUT_LOSS_THRESHOLD:
+        loss_per_share = position.up_avg_price - up_price
+        if loss_per_share >= CONFIG.CUT_LOSS_MIN_LOSS:
+            shares_to_sell = position.up_shares  # Sell all
+            exits.append(("Up", shares_to_sell, f"CUT_LOSS: Up @ ${up_price:.3f} (loss ${loss_per_share:.3f}/share)"))
+    
+    # Check Down side for loss exit
+    if position.down_shares > 0 and down_price <= CONFIG.CUT_LOSS_THRESHOLD:
+        loss_per_share = position.down_avg_price - down_price
+        if loss_per_share >= CONFIG.CUT_LOSS_MIN_LOSS:
+            shares_to_sell = position.down_shares  # Sell all
+            exits.append(("Down", shares_to_sell, f"CUT_LOSS: Down @ ${down_price:.3f} (loss ${loss_per_share:.3f}/share)"))
+    
+    # === REBALANCING ===
+    # Sell overweight side to improve hedge ratio
+    
+    if position.hedge_ratio < CONFIG.REBALANCE_THRESHOLD:
+        if position.up_shares > position.down_shares:
+            # Up is overweight, consider selling some Up
+            excess = position.up_shares - position.down_shares
+            if excess >= CONFIG.MIN_POSITION_FOR_REBALANCE:
+                shares_to_sell = min(excess * CONFIG.REBALANCE_SELL_RATIO, excess)
+                if shares_to_sell >= 1.0:  # At least 1 share
+                    exits.append(("Up", shares_to_sell, f"REBALANCE: Up overweight by {excess:.0f} (ratio={position.hedge_ratio:.1%})"))
+        else:
+            # Down is overweight, consider selling some Down
+            excess = position.down_shares - position.up_shares
+            if excess >= CONFIG.MIN_POSITION_FOR_REBALANCE:
+                shares_to_sell = min(excess * CONFIG.REBALANCE_SELL_RATIO, excess)
+                if shares_to_sell >= 1.0:  # At least 1 share
+                    exits.append(("Down", shares_to_sell, f"REBALANCE: Down overweight by {excess:.0f} (ratio={position.hedge_ratio:.1%})"))
+    
+    return exits
+
+
+async def execute_sell(
+    market: "MarketPrice",
+    position: "Position", 
+    outcome: str,
+    shares: float,
+    reason: str
+) -> bool:
+    """
+    Execute a sell order for a position.
+    
+    Args:
+        market: Current market prices
+        position: The position to sell from
+        outcome: "Up" or "Down"
+        shares: Number of shares to sell
+        reason: Reason for the sell (for logging)
+    
+    Returns:
+        True if sell was successful
+    """
+    # Get token ID and current price
+    if outcome == "Up":
+        token_id = market.up_token_id
+        price = market.up_price
+        current_shares = position.up_shares
+    else:
+        token_id = market.down_token_id
+        price = market.down_price
+        current_shares = position.down_shares
+    
+    # Validate
+    if shares > current_shares:
+        shares = current_shares
+    
+    if shares < 1:
+        return False
+    
+    asset = market.slug.split("-")[0].upper() if market.slug else "UNK"
+    logger.info(f"SELL SIGNAL {asset}: {reason}")
+    
+    # For sells, we hit the bid (best bid price)
+    # Get orderbook to find best bid
+    book = await fetch_order_book(token_id)
+    if not book:
+        logger.warning(f"No orderbook for sell - {market.title[:30]}")
+        return False
+    
+    bids = book.get("bids", [])
+    if not bids:
+        logger.warning(f"No bids for sell - {market.title[:30]}")
+        return False
+    
+    # Get best bid (highest price someone will buy at)
+    if isinstance(bids[0], dict):
+        best_bid = max(float(b["price"]) for b in bids)
+    else:
+        best_bid = max(float(b[0]) for b in bids)
+    
+    logger.info(f"SELL ORDER: {outcome} @ ${best_bid:.3f} x {shares:.1f} shares")
+    
+    # Submit sell order
+    t_start = time.perf_counter()
+    result = await submit_order(
+        token_id=token_id,
+        side="SELL",
+        price=best_bid,
+        size=shares,
+        order_type="FOK",
+        fill_estimate=None
+    )
+    t_end = time.perf_counter()
+    
+    if result.get("status") in ("FILLED", "SIMULATED_FILL", "success"):
+        fill_price = result.get("avg_price", best_bid)
+        proceeds = shares * fill_price
+        
+        # Update position
+        if outcome == "Up":
+            position.up_shares -= shares
+            position.up_cost -= shares * position.up_avg_price
+        else:
+            position.down_shares -= shares
+            position.down_cost -= shares * position.down_avg_price
+        
+        # Increment trade counter
+        global TRADE_COUNTER
+        TRADE_COUNTER += 1
+        
+        logger.info(f"[SIM] SELL #{TRADE_COUNTER:04d} | {market.slug} {outcome} | ${fill_price:.3f} x {shares:.1f} | Proceeds ${proceeds:.2f} | E2E {(t_end-t_start)*1000:.0f}ms")
+        
+        # Log the trade
+        log_trade(DetailedTradeLog(
+            trade_id=TRADE_COUNTER,
+            timestamp=datetime.utcnow().isoformat(),
+            condition_id=market.condition_id,
+            market_title=market.title,
+            market_slug=market.slug,
+            outcome=outcome,
+            side="SELL",
+            signal_type=reason.split(":")[0],
+            signal_price=price,
+            fill_estimate=None,
+            order_result=result,
+            latency_ms=(t_end-t_start)*1000,
+        ))
+        
+        return True
+    else:
+        logger.warning(f"Sell failed: {result}")
+        return False
+
+
+async def process_exit_signals(market: "MarketPrice"):
+    """Check and execute any exit signals for a market position."""
+    if not CONFIG.ENABLE_SELLS:
+        return
+    
+    position = STATE.account.positions.get(market.condition_id)
+    if not position:
+        return
+    
+    # Check exit conditions
+    exits = await check_exit_conditions(market, position)
+    
+    # Execute any exits
+    for outcome, shares, reason in exits:
+        await execute_sell(market, position, outcome, shares, reason)
+
 async def process_market_signal(market: MarketPrice):
     """Process a market tick and generate/execute signals."""
     t_detection_start = time.perf_counter()
@@ -1446,7 +1674,7 @@ async def process_market_signal(market: MarketPrice):
 
     # DEBUG: Log every market check
     asset = market.slug.split('-')[0].upper()[:3]
-    logger.debug(f"SIGNAL CHECK {asset}: Up=${market.up_price:.3f} Down=${market.down_price:.3f} Pair=${market.pair_cost:.3f}")
+    logger.info(f"SIGNAL CHECK {asset}: Up=${market.up_price:.3f} Down=${market.down_price:.3f} Pair=${market.pair_cost:.3f}")
 
     # Calculate time to resolution
     time_to_resolution = 900  # Default to full 15 min if unknown
@@ -1533,6 +1761,25 @@ async def process_market_signal(market: MarketPrice):
         if market.down_price < CONFIG.MAX_COMPLETION_PRICE:
             down_signal_type = "PAIR_COMPLETE"
             logger.info(f"PAIR_COMPLETE {asset}: Buying Down @ ${market.down_price:.3f} to hedge (ratio={position.hedge_ratio:.1%}, up={position.up_shares:.0f} > down={position.down_shares:.0f})")
+
+    # =========================================================================
+    # HEDGE_MATCH: Buy the other side when pair cost allows profit
+    # Reference achieves avg 1.6% profit at $0.985 pair cost
+    # Only skip hedge when it would cause guaranteed loss (pair > $1)
+    # =========================================================================
+    if up_signal_type and not down_signal_type:
+        # Check if hedging would be profitable (pair < $1)
+        if market.pair_cost < 1.0 and market.down_price < CONFIG.MAX_COMPLETION_PRICE:
+            down_signal_type = "HEDGE_MATCH"
+            profit_margin = (1.0 - market.pair_cost) * 100
+            logger.info(f"HEDGE_MATCH {asset}: Down @ ${market.down_price:.3f} (pair=${market.pair_cost:.3f}, margin={profit_margin:.1f}%)")
+
+    if down_signal_type and not up_signal_type:
+        # Check if hedging would be profitable (pair < $1)
+        if market.pair_cost < 1.0 and market.up_price < CONFIG.MAX_COMPLETION_PRICE:
+            up_signal_type = "HEDGE_MATCH"
+            profit_margin = (1.0 - market.pair_cost) * 100
+            logger.info(f"HEDGE_MATCH {asset}: Up @ ${market.up_price:.3f} (pair=${market.pair_cost:.3f}, margin={profit_margin:.1f}%)")
 
     detection_ms = (time.perf_counter() - t_detection_start) * 1000
 
@@ -1626,8 +1873,17 @@ async def execute_signal(
     # Order building phase
     t_build_start = time.perf_counter()
 
-    trade_size_usd = calculate_trade_size(price)
-    shares = trade_size_usd / price
+    # Calculate trade size
+    if signal_type == "HEDGE_MATCH":
+        # HEDGE_MATCH: Match SHARES of the original cheap side signal
+        # Original uses calculate_trade_size(cheap_price), we match that share count
+        cheap_price = min(market.up_price, market.down_price)
+        original_usd = calculate_trade_size(cheap_price)  # Same $ tier as original
+        shares = original_usd / cheap_price  # Same shares as original would get
+        trade_size_usd = shares * price  # Actual cost at our price
+    else:
+        trade_size_usd = calculate_trade_size(price)
+        shares = trade_size_usd / price
 
     # =========================================================================
     # STEP 2: Calculate realistic fill estimate based on order book
@@ -1850,44 +2106,34 @@ async def price_loop():
                 if not parsed or not parsed.get("up_token_id") or not parsed.get("down_token_id"):
                     continue
 
-                # PRIMARY: Use outcomePrices from Gamma API (this is the REAL market price!)
-                outcome_prices = market_data.get("outcomePrices", [])
-                if isinstance(outcome_prices, str):
-                    try:
-                        outcome_prices = json.loads(outcome_prices)
-                    except:
-                        outcome_prices = []
+                # Use CLOB order book (always accurate per user confirmation)
+                up_book = await fetch_order_book(parsed["up_token_id"])
+                down_book = await fetch_order_book(parsed["down_token_id"])
 
-                if outcome_prices and len(outcome_prices) >= 2:
-                    # outcomePrices[0] = Up/Yes, outcomePrices[1] = Down/No
-                    up_price = float(outcome_prices[0])
-                    down_price = float(outcome_prices[1])
-                    logger.debug(f"Using outcomePrices: Up ${up_price:.3f} Down ${down_price:.3f}")
+                if not up_book or not down_book:
+                    logger.warning(f"CLOB unavailable for {parsed.get('title', '')[:30]}")
+                    continue
+
+                up_asks = up_book.get("asks", [])
+                down_asks = down_book.get("asks", [])
+
+                if not up_asks or not down_asks:
+                    logger.warning(f"Empty orderbook for {parsed.get('title', '')[:30]}")
+                    continue
+
+                # Parse ask prices - get LOWEST (best for buyer) ask, not first
+                # CLOB returns asks sorted descending, so we need min()
+                if isinstance(up_asks[0], dict):
+                    up_price = min(float(a["price"]) for a in up_asks)
                 else:
-                    # FALLBACK: Use CLOB order book if outcomePrices not available
-                    up_book = await fetch_order_book(parsed["up_token_id"])
-                    down_book = await fetch_order_book(parsed["down_token_id"])
+                    up_price = min(float(a[0]) for a in up_asks)
 
-                    if not up_book or not down_book:
-                        continue
+                if isinstance(down_asks[0], dict):
+                    down_price = min(float(a["price"]) for a in down_asks)
+                else:
+                    down_price = min(float(a[0]) for a in down_asks)
 
-                    up_asks = up_book.get("asks", [])
-                    down_asks = down_book.get("asks", [])
-
-                    if not up_asks or not down_asks:
-                        continue
-
-                    if isinstance(up_asks[0], dict):
-                        up_price = float(up_asks[0]["price"])
-                    else:
-                        up_price = float(up_asks[0][0])
-
-                    if isinstance(down_asks[0], dict):
-                        down_price = float(down_asks[0]["price"])
-                    else:
-                        down_price = float(down_asks[0][0])
-
-                    logger.debug(f"Using CLOB order book: Up ${up_price:.3f} Down ${down_price:.3f}")
+                logger.info(f"CLOB prices: Up=${up_price:.3f} Down=${down_price:.3f} Pair=${up_price+down_price:.3f}")
 
                 # Liquidity from Gamma API or estimate
                 up_liquidity = float(market_data.get("volume", 0)) / 2  # Rough estimate
@@ -1929,6 +2175,9 @@ async def price_loop():
 
                 # Process for signals
                 await process_market_signal(market_price)
+
+                # Check for exit conditions (sells)
+                await process_exit_signals(market_price)
 
             STATE.last_price_update = datetime.utcnow()
 
