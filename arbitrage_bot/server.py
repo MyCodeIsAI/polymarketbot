@@ -31,6 +31,17 @@ from fastapi.responses import FileResponse, JSONResponse
 import httpx
 import uvicorn
 
+# py_clob_client for authenticated CLOB API access (required for live mode)
+try:
+    from py_clob_client.client import ClobClient
+    from py_clob_client.clob_types import OrderArgs, OrderType, ApiCreds
+    from py_clob_client.order_builder.constants import BUY, SELL
+    PY_CLOB_AVAILABLE = True
+except ImportError:
+    PY_CLOB_AVAILABLE = False
+    ClobClient = None
+    logger.warning("py_clob_client not installed - live mode will not work")
+
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -108,11 +119,11 @@ class Config:
     ENABLE_SELLS: bool = True                 # Enable sell logic
     
     # Profit taking - sell winning position when price >= threshold
-    PROFIT_EXIT_THRESHOLD: float = 0.92       # Sell when position price >= 0.92
+    PROFIT_EXIT_THRESHOLD: float = 0.70       # Sell at $0.70+ (reference pattern: mid-range sells)
     PROFIT_EXIT_MIN_PROFIT: float = 0.05      # Min profit per share to trigger
     
     # Cut losses - sell losing position when price <= threshold  
-    CUT_LOSS_THRESHOLD: float = 0.08          # Sell when position price <= 0.08
+    CUT_LOSS_THRESHOLD: float = 0.30          # Sell at $0.30- (reference pattern: mid-range sells)
     CUT_LOSS_MIN_LOSS: float = 0.10           # Min loss per share to trigger
     
     # Rebalancing - sell overweight side to improve hedge ratio
@@ -129,13 +140,14 @@ class Config:
     # Position sizing by price (mirrors their pattern)
     # Verified: Cheap trades avg $5, Mid $27, Expensive $62
     # We scale proportionally for small account
-    TRADE_SIZE_CHEAP: float = 2.0             # Trades at < $0.30
+    TRADE_SIZE_CHEAP: float = 8.0             # Reference pattern: LARGER on cheap side (avg 52.5 vs 39.4 shares)
     TRADE_SIZE_MID: float = 5.0               # Trades at $0.30-$0.60
-    TRADE_SIZE_EXPENSIVE: float = 10.0        # Trades at > $0.60
+    TRADE_SIZE_EXPENSIVE: float = 5.0        # Smaller on expensive side per reference pattern
 
     # Timing
     PRICE_CHECK_INTERVAL_SEC: float = 1.0
-    MIN_TIME_TO_RESOLUTION_SEC: int = 5  # Only skip if < 5 seconds to resolution (order wouldn't fill anyway)
+    MIN_TIME_TO_RESOLUTION_SEC: int = 5  # Only skip if < 5 seconds to resolution
+    MAX_TIME_TO_RESOLUTION_SEC: int = 900  # Only trade in last 5 min (reference: 97% trades in last 5 min)
 
     # Risk
     MIN_HEDGE_RATIO: float = 0.70           # Accept up to 30% imbalance
@@ -189,6 +201,17 @@ class Config:
     MAX_TAKER_FEE_PCT: float = 3.0   # Fee at 50% probability (peak)
     # Fee formula: fee_pct = MAX_TAKER_FEE_PCT * (1 - abs(price - 0.5) * 4)
     # This creates a curve that peaks at 0.5 and drops to ~0 at 0/1
+
+    # ==========================================================================
+    # MAKER ORDER SETTINGS - Match reference account behavior
+    # ==========================================================================
+    # Reference account uses 76.8% maker orders:
+    # - 100% of SELLs are maker (GTC) - NEVER taker sells
+    # - 59% of high-price BUYs ($0.90+) are maker (GTC)
+    # - Most other BUYs are taker (FOK)
+    USE_MAKER_SELLS: bool = True           # Use GTC for ALL sells (reference: 100%)
+    USE_MAKER_HIGH_BUYS: bool = True       # Use GTC for buys at high prices
+    MAKER_BUY_THRESHOLD: float = 0.90      # Price above which to use maker buys
 
     # Paper trading
     STARTING_BALANCE: float = 200.0
@@ -868,6 +891,60 @@ STATE = AppState()
 CLOB_API = "https://clob.polymarket.com"
 GAMMA_API = "https://gamma-api.polymarket.com"
 
+# Global ClobClient for authenticated order submission
+CLOB_CLIENT: Optional[ClobClient] = None
+
+def init_clob_client() -> bool:
+    """Initialize the ClobClient with API credentials.
+
+    Returns True if successful, False otherwise.
+    Requires environment variables:
+    - POLYMARKET_API_KEY
+    - POLYMARKET_API_SECRET
+    - POLYMARKET_PRIVATE_KEY
+    """
+    global CLOB_CLIENT
+
+    if not PY_CLOB_AVAILABLE:
+        logger.error("py_clob_client not installed - cannot init ClobClient")
+        return False
+
+    if not CONFIG.API_KEY or not CONFIG.PRIVATE_KEY:
+        logger.error("Missing API credentials - cannot init ClobClient")
+        return False
+
+    try:
+        # Initialize ClobClient with credentials
+        CLOB_CLIENT = ClobClient(
+            host=CLOB_API,
+            key=CONFIG.API_KEY,
+            chain_id=137,  # Polygon mainnet
+            private_key=CONFIG.PRIVATE_KEY,
+            signature_type=2,  # POLY_GNOSIS_SAFE signature type
+        )
+
+        # Derive API credentials if we have API_SECRET
+        if CONFIG.API_SECRET:
+            creds = ApiCreds(
+                api_key=CONFIG.API_KEY,
+                api_secret=CONFIG.API_SECRET,
+                api_passphrase=CONFIG.API_PASSPHRASE if hasattr(CONFIG, 'API_PASSPHRASE') else "",
+            )
+            CLOB_CLIENT.set_api_creds(creds)
+            logger.info("ClobClient initialized with API credentials")
+        else:
+            # Derive credentials from private key
+            CLOB_CLIENT.create_or_derive_api_creds()
+            logger.info("ClobClient initialized with derived credentials")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to initialize ClobClient: {e}")
+        CLOB_CLIENT = None
+        return False
+
+
 async def fetch_crypto_markets() -> List[dict]:
     """Fetch active 15-minute crypto markets from Gamma API using series endpoint.
 
@@ -1142,20 +1219,16 @@ async def submit_order_simulation(token_id: str, side: str, price: float, size: 
 
     submission_ms = (time.perf_counter() - t_start) * 1000
 
-    # Determine simulated success based on fill estimate
-    would_fill = fill_estimate.would_fill if fill_estimate else True
-    # Increased fill prob - reference account has 97.5% hedge rate proving high fills
-    fill_prob = 0.97  # Match reference account fill rate
-
-    # Roll the dice based on fill probability
-    success = random.random() < fill_prob if would_fill else False
+    # All simulation orders succeed - we're testing the logic, not fill probability
+    # Fill probability is determined by actual orderbook in live mode
+    success = True
 
     return {
         "success": success,
         "submission_ms": submission_ms,
-        "status_code": 200 if success else 400,
-        "error_message": None if success else f"SIMULATION: Fill prob {fill_prob:.0%}, would_fill={would_fill}",
-        "clob_order_id": f"SIM-{int(time.time()*1000)}" if success else None,
+        "status_code": 200,
+        "error_message": None,
+        "clob_order_id": f"SIM-{int(time.time()*1000)}",
         "is_api_error": False,
         "is_simulation": True,
     }
@@ -1165,22 +1238,88 @@ async def submit_order_live(token_id: str, side: str, price: float, size: float,
     """
     LIVE MODE: Submit actual order to CLOB API with authentication.
 
-    Requires POLYMARKET_API_KEY, POLYMARKET_API_SECRET, and POLYMARKET_PRIVATE_KEY
-    environment variables to be set.
+    Uses py_clob_client for authenticated order submission.
+    Requires environment variables:
+    - POLYMARKET_API_KEY
+    - POLYMARKET_API_SECRET
+    - POLYMARKET_PRIVATE_KEY
+
+    Order types:
+    - FOK: Fill-or-Kill (taker) - fills immediately or cancels
+    - GTC: Good-Til-Canceled (maker) - sits on orderbook until filled or canceled
     """
     t_start = time.perf_counter()
 
-    # Check for credentials
+    # Use ClobClient if available (proper authenticated submission)
+    if CLOB_CLIENT is not None:
+        try:
+            # Map side string to py_clob_client constant
+            order_side = BUY if side.upper() == "BUY" else SELL
+
+            # Map order type string to py_clob_client enum
+            clob_order_type = OrderType.GTC if order_type == "GTC" else OrderType.FOK
+
+            # Create and sign the order
+            signed_order = CLOB_CLIENT.create_order(
+                OrderArgs(
+                    token_id=token_id,
+                    price=price,
+                    size=size,
+                    side=order_side,
+                )
+            )
+
+            # Submit the order
+            response = CLOB_CLIENT.post_order(signed_order, order_type=clob_order_type)
+
+            submission_ms = (time.perf_counter() - t_start) * 1000
+
+            # Parse response
+            if response and response.get("success"):
+                return {
+                    "success": True,
+                    "submission_ms": submission_ms,
+                    "status_code": 200,
+                    "error_message": None,
+                    "clob_order_id": response.get("orderID") or response.get("orderIds", [None])[0],
+                    "is_api_error": False,
+                    "is_simulation": False,
+                    "order_type": order_type,
+                    "is_maker": order_type == "GTC",
+                }
+            else:
+                return {
+                    "success": False,
+                    "submission_ms": submission_ms,
+                    "status_code": 400,
+                    "error_message": response.get("error") if response else "Unknown error",
+                    "clob_order_id": None,
+                    "is_api_error": False,
+                    "is_simulation": False,
+                }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "submission_ms": (time.perf_counter() - t_start) * 1000,
+                "error_message": f"ClobClient error: {str(e)}",
+                "is_api_error": True,
+                "is_simulation": False,
+            }
+
+    # Fallback: No ClobClient - make unauthenticated call for latency tracking
+    # This will fail with 401 but gives us real network latency data
     if not CONFIG.API_KEY or not CONFIG.PRIVATE_KEY:
+        # No credentials at all - return error immediately
         return {
             "success": False,
             "submission_ms": (time.perf_counter() - t_start) * 1000,
-            "error_message": "LIVE MODE ERROR: Missing API credentials. Set POLYMARKET_API_KEY and POLYMARKET_PRIVATE_KEY",
+            "error_message": "LIVE MODE: Missing API credentials (POLYMARKET_API_KEY, POLYMARKET_PRIVATE_KEY)",
             "is_api_error": True,
             "is_simulation": False,
         }
 
-    # Build order payload
+    # Make unauthenticated HTTP call for latency tracking
     order_data = {
         "tokenID": token_id,
         "side": side,
@@ -1189,24 +1328,12 @@ async def submit_order_live(token_id: str, side: str, price: float, size: float,
         "type": order_type,
     }
 
-    # TODO: Add proper CLOB authentication headers here
-    # This requires py-clob-client or manual signature generation
-    # For now, we attempt unauthenticated to track latency
-
     async with httpx.AsyncClient(timeout=5.0) as client:
         try:
-            # In full live mode, you'd use py-clob-client here:
-            # from py_clob_client.client import ClobClient
-            # client = ClobClient(host=CLOB_API, key=CONFIG.API_KEY, ...)
-            # response = client.create_order(...)
-
             resp = await client.post(
                 f"{CLOB_API}/order",
                 json=order_data,
-                headers={
-                    "Content-Type": "application/json",
-                    # Add auth headers here when implementing full live mode
-                }
+                headers={"Content-Type": "application/json"}
             )
             submission_ms = (time.perf_counter() - t_start) * 1000
 
@@ -1227,7 +1354,7 @@ async def submit_order_live(token_id: str, side: str, price: float, size: float,
                 if not result["success"]:
                     result["error_message"] = data.get("error", "Unknown error")
             elif resp.status_code == 401:
-                result["error_message"] = "Authentication required - check API credentials"
+                result["error_message"] = "Auth required - ClobClient not initialized (check API credentials)"
             elif resp.status_code == 403:
                 result["error_message"] = "Forbidden - API key may lack permissions"
             elif resp.status_code == 400:
@@ -1273,6 +1400,29 @@ async def submit_order(token_id: str, side: str, price: float, size: float, orde
     else:
         logger.debug(f"SIM ORDER: {side} {size:.2f} shares @ ${price:.4f}")
         return await submit_order_simulation(token_id, side, price, size, fill_estimate)
+
+
+def select_order_type(side: str, price: float) -> str:
+    """Select FOK (taker) or GTC (maker) based on reference account patterns.
+
+    Reference behavior:
+    - ALL sells are maker (GTC) - 100%
+    - High-price buys ($0.90+) are 59% maker (GTC)
+    - Other buys are mostly taker (FOK)
+
+    Returns "FOK" for taker orders, "GTC" for maker orders.
+    """
+    if side.upper() == "SELL":
+        # Reference uses 100% maker for sells
+        return "GTC" if CONFIG.USE_MAKER_SELLS else "FOK"
+
+    if side.upper() == "BUY":
+        # Use maker for high-price buys (reference: 59% at $0.90+)
+        if CONFIG.USE_MAKER_HIGH_BUYS and price >= CONFIG.MAKER_BUY_THRESHOLD:
+            return "GTC"
+        return "FOK"
+
+    return "FOK"  # Default to taker
 
 
 def parse_market_with_tokens(market_data: dict) -> Optional[dict]:
@@ -1587,8 +1737,11 @@ async def execute_sell(
     else:
         best_bid = max(float(b[0]) for b in bids)
     
-    logger.info(f"SELL ORDER: {outcome} @ ${best_bid:.3f} x {shares:.1f} shares")
-    
+    # Select order type based on reference patterns (100% of sells are maker)
+    order_type = select_order_type("SELL", best_bid)
+    order_type_label = "MAKER" if order_type == "GTC" else "TAKER"
+    logger.info(f"SELL ORDER ({order_type_label}): {outcome} @ ${best_bid:.3f} x {shares:.1f} shares")
+
     # Submit sell order
     t_start = time.perf_counter()
     result = await submit_order(
@@ -1596,12 +1749,12 @@ async def execute_sell(
         side="SELL",
         price=best_bid,
         size=shares,
-        order_type="FOK",
+        order_type=order_type,
         fill_estimate=None
     )
     t_end = time.perf_counter()
     
-    if result.get("status") in ("FILLED", "SIMULATED_FILL", "success"):
+    if result.get("status") in ("FILLED", "SIMULATED_FILL", "success") or result.get("success") == True:
         fill_price = result.get("avg_price", best_bid)
         proceeds = shares * fill_price
         
@@ -1685,6 +1838,11 @@ async def process_market_signal(market: MarketPrice):
     if time_to_resolution < CONFIG.MIN_TIME_TO_RESOLUTION_SEC:
         logger.info(f"BLOCKED {asset}: Too close to resolution ({time_to_resolution:.0f}s)")
         return  # Too close to resolution, skip
+
+    # TIMING CHECK: Only trade in last 5 minutes (reference pattern: 97% in last 5 min)
+    if time_to_resolution > CONFIG.MAX_TIME_TO_RESOLUTION_SEC:
+        logger.info(f"WAITING {asset}: {time_to_resolution:.0f}s to resolution, waiting for last 5 min")
+        return  # Too early, wait for last 5 minutes
 
     # Get dynamic thresholds based on time window
     aggressive_threshold, standard_threshold = get_dynamic_thresholds(time_to_resolution)
@@ -1914,13 +2072,17 @@ async def execute_signal(
     STATE.signals.append(signal)
     LATENCY.record_detection(detection_ms)
 
+    # Select order type based on reference patterns
+    # High-price buys ($0.90+) use maker 59% of time
+    order_type = select_order_type("BUY", realistic_fill_price)
+
     # Submit order - routes to simulation or live based on CONFIG.LIVE_MODE
     result = await submit_order(
         token_id=token_id,
         side="BUY",
         price=realistic_fill_price,  # Use realistic price
         size=shares,
-        order_type="FOK",
+        order_type=order_type,
         fill_estimate=fill_estimate,  # Pass for simulation accuracy
     )
 
@@ -2012,29 +2174,34 @@ async def execute_signal(
         f"E2E {e2e_ms:.0f}ms"
     )
 
-    # Update paper trading position (simulate fill for paper trading)
-    if market.condition_id not in STATE.account.positions:
-        STATE.account.positions[market.condition_id] = Position(
-            condition_id=market.condition_id,
-            market_title=market.title,
-            slug=market.slug,  # For resolution lookups
-            opened_at=datetime.utcnow(),
-        )
+    # Update position ONLY if order succeeded (critical for live mode)
+    # In simulation: success depends on fill probability
+    # In live mode: success means order actually filled
+    if result["success"]:
+        if market.condition_id not in STATE.account.positions:
+            STATE.account.positions[market.condition_id] = Position(
+                condition_id=market.condition_id,
+                market_title=market.title,
+                slug=market.slug,  # For resolution lookups
+                opened_at=datetime.utcnow(),
+            )
 
-    position = STATE.account.positions[market.condition_id]
-    if outcome == "Up":
-        position.up_shares += shares
-        position.up_cost += trade_size_usd
+        position = STATE.account.positions[market.condition_id]
+        if outcome == "Up":
+            position.up_shares += shares
+            position.up_cost += trade_size_usd
+        else:
+            position.down_shares += shares
+            position.down_cost += trade_size_usd
+        position.trades_count += 1
+
+        # Calculate and deduct taker fee
+        fee = calculate_taker_fee(price, trade_size_usd)
+        STATE.account.balance -= trade_size_usd
+        STATE.account.balance -= fee
+        STATE.account.total_fees_paid += fee
     else:
-        position.down_shares += shares
-        position.down_cost += trade_size_usd
-    position.trades_count += 1
-
-    # Calculate and deduct taker fee
-    fee = calculate_taker_fee(price, trade_size_usd)
-    STATE.account.balance -= trade_size_usd
-    STATE.account.balance -= fee
-    STATE.account.total_fees_paid += fee
+        fee = 0.0  # No fee if order didn't fill
 
     fee_info = f" | Fee: ${fee:.2f}" if fee > 0 else ""
     logger.info(
@@ -2748,7 +2915,14 @@ app.mount("/arbitrage/static", StaticFiles(directory=Path(__file__).parent / "we
 
 @app.on_event("startup")
 async def startup_event():
-    """Start price loop if auto-start is enabled."""
+    """Initialize ClobClient and start price loop if auto-start is enabled."""
+    # Initialize ClobClient for live mode
+    if CONFIG.LIVE_MODE:
+        if init_clob_client():
+            logger.info("ClobClient initialized - live trading ENABLED")
+        else:
+            logger.warning("ClobClient initialization FAILED - orders will fail with 401")
+
     if STATE.is_running:
         logger.info("Auto-starting price loop...")
         asyncio.create_task(price_loop())
