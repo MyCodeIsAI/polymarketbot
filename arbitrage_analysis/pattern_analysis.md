@@ -1,10 +1,95 @@
 # Reference Account Pattern Analysis - FINAL VERIFIED
 ## Data Source: 0x93c22116e4402c9332ee6db578050e688934c072
 
-**Last Updated**: 2026-01-30 18:15 UTC
+**Last Updated**: 2026-01-30 19:30 UTC
 **Data Coverage**: 181,288 trades (148,587 BUY, 32,701 SELL) - FRESH DATA
 **Bot Status**: RUNNING with CORRECTED thresholds
 **Validation Status**: EXHAUSTIVE AUDIT COMPLETE - All thresholds verified against historical
+
+---
+
+## ⚠️ CRITICAL DISCOVERY: CUT_LOSS MARKET CONTEXT (2026-01-30 18:30 UTC)
+
+### Live Monitoring Finding
+
+**Today's market**: Up=$0.99, Down=$0.02 (very confident)
+
+| Metric | Reference | Bot | Issue |
+|--------|-----------|-----|-------|
+| Buys | 131 ($6,271) | 120 | Similar |
+| Sells | 8 ($455) | 98 | **Bot 12x more sells!** |
+| Buy:Sell ratio | 16:1 | 1.2:1 | **Bot over-selling** |
+
+The bot was CUT_LOSS selling while reference was BUYING MORE at cheap prices.
+
+### Historical Data Analysis (181k trades)
+
+**When one side reaches 0.95+ (like today):**
+
+| Action | Count | Rate |
+|--------|-------|------|
+| Windows that SOLD low | 55 | 64.0% |
+| Windows that BOUGHT low | 81 | **94.2%** |
+| **Total low BUYS vs SELLS** | 5116 vs 434 | **11.8x more buys!** |
+
+**This is the cheap hedge/insurance strategy:**
+- When market is confident (Up=0.95+), the Down side is CHEAP
+- Reference BUYS the cheap side as insurance (11.8x more than sells)
+- Bot was SELLING the cheap side at a loss
+
+### Fix Applied (2026-01-30 18:45 UTC)
+
+```python
+# NEW CONFIG
+CUT_LOSS_DISABLE_CONFIDENT: float = 0.90  # Disable CUT_LOSS when opposite side >= this
+
+# MODIFIED LOGIC
+# Check Down side for loss exit
+if position.down_shares > 0 and down_price <= CONFIG.CUT_LOSS_THRESHOLD:
+    if up_price >= CONFIG.CUT_LOSS_DISABLE_CONFIDENT:
+        # DON'T cut - market is confident, this is a cheap hedge
+        logger.debug(f"CUT_LOSS skipped: Down @ ${down_price:.3f} - Up confident @ ${up_price:.3f}")
+    else:
+        # Normal CUT_LOSS logic
+        ...
+```
+
+### Detailed Historical Evidence
+
+**Overall stats:**
+- Buy:Sell ratio: 4.5:1 (reference sells ~22% as much as buys)
+- 32.6% of sells below $0.30 (CUT_LOSS zone)
+- 9.1% of sells at $0.00-$0.01 (resolution)
+
+**Sell rate by market confidence:**
+| Confidence | Windows | Sell Rate |
+|------------|---------|-----------|
+| 0.50-0.60 | 20 | 2.3% |
+| 0.60-0.70 | 8 | 8.0% |
+| 0.70-0.80 | 8 | 3.9% |
+| 0.80-0.90 | 24 | 6.6% |
+| 0.90-0.95 | 23 | 7.6% |
+| **0.95-1.00** | 184 | **12.2%** |
+
+**Key insight**: Even in very confident markets (0.95+), sell rate is only 12.2% - NOT higher. Reference holds through confidence.
+
+**When bought at $0.40-$0.60 and price went to <$0.10:**
+- SOLD LOW: 58.4%
+- BOUGHT MORE LOW: 41.6%
+
+**Per-window behavior:**
+- Buy more rate: 15.8%
+- Cut rate: 35.4%
+- **HOLD (no action): 48.7%**
+
+### Summary
+
+The nuance we were missing: CUT_LOSS is **context-dependent**:
+1. When market is BALANCED: Reference may cut losses (35% of time)
+2. When market is CONFIDENT (0.90+): Reference BUYS more, not sells (11.8x ratio)
+3. When uncertain: Reference often just HOLDS (48.7%)
+
+The simple "$0.30 = cut losses" rule was missing the market confidence context.
 
 ---
 
