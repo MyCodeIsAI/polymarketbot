@@ -1965,6 +1965,70 @@ if market.up_price < aggressive_threshold:
 
 ---
 
+## PAIR_COMPLETE FIX: Require Both Sides (IMPLEMENTED ✓ - 2026-01-30 22:24 UTC)
+
+### Problem Identified
+
+Real-time comparison showed bot buying expensive on minority side when ref was 100% directional:
+- **REF ETH**: 51 trades on Up, 0 on Down (100% directional)
+- **BOT ETH**: 18C + 6M on Up, **47 expensive on Down** (PAIR_COMPLETE fighting directionality)
+
+PAIR_COMPLETE was triggering when we had shares only on one side, trying to "balance" a position the ref intended to be directional.
+
+### Historical Data Verification - FULL DATASET (44,503 BUYs)
+
+**When ref buys minority side in directional windows, did they already have BOTH sides?**
+
+| Condition | Had BOTH sides | Had ONE side |
+|-----------|----------------|--------------|
+| All minority buys | **97.3%** | 2.7% |
+| >=70% directional | **92.1%** | 7.9% |
+| >=80% directional | **78.3%** | 21.7% |
+
+**97.3% of minority side buys happen when ref ALREADY had positions on both sides.**
+
+The 60 edge cases (2.7%) where ref bought minority with only one side:
+- 71.7% are mid-range prices (not expensive completions)
+- 43.3% occur in first 3 trades (early window establishment)
+
+### Directional Pattern Analysis
+
+When ref is directional (>=60% one side):
+
+| Side | Cheap | Mid | Expensive |
+|------|-------|-----|-----------|
+| **DOMINANT** | 5.6% | 17.6% | **76.8%** |
+| **MINORITY** | **60.0%** | 27.7% | 12.3% |
+
+**Key insight**: Directionality comes from piling on expensive on one side while buying cheap on the other.
+
+### Fix Applied
+
+Only PAIR_COMPLETE when we have shares on BOTH sides (confirms ref intended balance):
+
+```python
+# BEFORE (WRONG):
+elif position and position.down_shares > position.up_shares * 1.5:
+    if market.up_price < CONFIG.MAX_COMPLETION_PRICE:
+        up_signal_type = "PAIR_COMPLETE"
+
+# AFTER (CORRECT - 97.3% validated):
+elif position and position.up_shares > 0 and position.down_shares > position.up_shares * 1.5:
+    # Only complete if we ALREADY have both sides (confirms ref intended balance)
+    if market.up_price < CONFIG.MAX_COMPLETION_PRICE:
+        up_signal_type = "PAIR_COMPLETE"
+```
+
+### Expected Impact
+
+| Metric | Before Fix | After Fix |
+|--------|------------|-----------|
+| PAIR_COMPLETE on directional | Fires (wrong) | **Blocked** |
+| Follows ref directionality | No | **Yes** |
+| Expensive on minority side | Excessive | **Natural** |
+
+---
+
 ## BALANCED_MAX_PAIR_COST ANALYSIS (VERIFIED ✓ - 2026-01-30 22:00 UTC)
 
 ### Full Dataset Analysis (12,186 trades, 934 windows)
