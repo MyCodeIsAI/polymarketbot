@@ -1705,6 +1705,295 @@ Cheap buying is still above target. This may be due to:
 
 ---
 
+## AGGRESSIVE PAIR COST FIX (IMPLEMENTED ✓ - 2026-01-30 19:30 UTC)
+
+### Problem Identified
+
+AGGRESSIVE signals were blocked when existing position had high average price. Example:
+- Holding Up at $2.50 avg price
+- Market: Down=$0.10 (cheap hedge opportunity)
+- Projected pair = $2.50 + $0.10 = $2.60 > MAX_PAIR_COST ($1.02)
+- **AGGRESSIVE blocked** even though market pair was $1.01
+
+This caused bot to have 0% cheap buys while reference had 26% in same window.
+
+### Fix Applied
+
+```python
+# OLD (blocked by projected pair):
+if market.down_price < aggressive_threshold:
+    if projected_pair_if_buy_down < CONFIG.MAX_PAIR_COST:
+        down_signal_type = "AGGRESSIVE"
+
+# NEW (uses market pair):
+if market.down_price < aggressive_threshold:
+    # Use MARKET pair cost, not projected - buy cheap hedges regardless of position cost basis
+    if market.pair_cost <= CONFIG.MAX_PAIR_COST:
+        down_signal_type = "AGGRESSIVE"
+```
+
+**Rationale**: Reference buys cheap hedges regardless of existing position cost basis. The market pair cost ($1.01) is what matters, not the projected pair based on old positions.
+
+---
+
+## DIRECTIONAL_EXPENSIVE SIGNAL (IMPLEMENTED ✓ - 2026-01-30 21:30 UTC)
+
+### Problem Identified
+
+Real-time comparison showed massive misalignment:
+- **REF**: C=0% M=44% E=56% (pile-on expensive only)
+- **BOT**: C=7% M=72% E=21% (buying both sides)
+
+Reference was piling on expensive WITHOUT buying cheap, but bot could only buy expensive via HEDGE_MATCH (which requires a cheap signal first).
+
+### Historical Data Verification - FULL DATASET (12,186 trades, 570 windows with expensive)
+
+**When reference buys expensive (>$0.60):**
+- **76.0%** have NO cheap buys in same window (pure pile-on) - 433/570 windows
+- **24.0%** have cheap buys (hedging) - 137/570 windows
+
+**Pile-on behavior by confidence level:**
+| Confidence | Pile-on (no cheap) | Hedge (with cheap) | Sample Size |
+|------------|-------------------|-------------------|-------------|
+| $0.90+ | **77%** | 23% | 389 windows |
+| $0.80-$0.90 | 44% | 56% | 54 windows |
+| $0.70-$0.80 | **76%** | 24% | 74 windows |
+| $0.60-$0.70 | **98%** | 2% | 53 windows |
+
+**When reference DOES hedge, cheap price distribution (4,351 buys):**
+- Median hedge cheap price: **$0.130**
+- < $0.05: 20.4%
+- < $0.10: 36.7%
+- < $0.15: 53.8%
+- < $0.20: 72.3%
+- < $0.25: 85.1%
+
+### Fix Applied - Phase 1: DIRECTIONAL_EXPENSIVE signal
+
+```python
+# NEW config:
+DIRECTIONAL_EXPENSIVE_MIN_PRICE: float = 0.70  # Only pile-on at high confidence
+
+# NEW signal (after HEDGE_MATCH):
+if not up_signal_type and market.up_price >= CONFIG.DIRECTIONAL_EXPENSIVE_MIN_PRICE:
+    if market.pair_cost <= CONFIG.HEDGE_MATCH_MAX_PAIR_COST:
+        up_signal_type = "DIRECTIONAL_EXPENSIVE"
+
+if not down_signal_type and market.down_price >= CONFIG.DIRECTIONAL_EXPENSIVE_MIN_PRICE:
+    if market.pair_cost <= CONFIG.HEDGE_MATCH_MAX_PAIR_COST:
+        down_signal_type = "DIRECTIONAL_EXPENSIVE"
+```
+
+### Problem: DIRECTIONAL_EXPENSIVE wasn't firing (only 5 times out of 84k trades)
+
+**Root cause:** Signal evaluation order:
+1. AGGRESSIVE fires for cheap side (< $0.25-0.30) → sets signal
+2. HEDGE_MATCH then fires for expensive side
+3. DIRECTIONAL_EXPENSIVE never fires because HEDGE_MATCH already set signal
+
+### Fix Applied - Phase 2: Conditional AGGRESSIVE (2026-01-30 20:54 UTC)
+
+Modify AGGRESSIVE to skip cheap when expensive is available AND cheap isn't super-cheap:
+
+```python
+# NEW configs:
+SUPER_CHEAP_THRESHOLD: float = 0.10   # Only hedge expensive if cheap is under this
+PILE_ON_EXPENSIVE_MIN: float = 0.70   # Consider this "expensive" for pile-on logic
+
+# MODIFIED AGGRESSIVE logic:
+if market.up_price < aggressive_threshold:
+    other_side_expensive = market.down_price >= CONFIG.PILE_ON_EXPENSIVE_MIN
+    is_super_cheap = market.up_price < CONFIG.SUPER_CHEAP_THRESHOLD
+
+    if other_side_expensive and not is_super_cheap:
+        # Skip cheap - let DIRECTIONAL_EXPENSIVE handle expensive side
+        pass
+    elif market.pair_cost <= CONFIG.MAX_PAIR_COST:
+        up_signal_type = "AGGRESSIVE"
+```
+
+**Threshold validation:**
+| Cheap Threshold | Simulated Pile-on % | Reference Actual |
+|-----------------|---------------------|------------------|
+| $0.05 | 85.9% | - |
+| $0.08 | 83.5% | - |
+| $0.10 | 81.6% | - |
+| $0.15 | 77.9% | - |
+| $0.20 | 75.0% | **72.6%** |
+
+**UPDATE (2026-01-30 21:07 UTC):** Full historical validation (28,151 buys, 1,693 windows):
+
+| Threshold | Pile-on Rate | vs Reference 72.6% |
+|-----------|--------------|-------------------|
+| $0.10 | 79.7% | +7.1% |
+| $0.15 | 76.0% | +3.4% |
+| $0.18 | 74.0% | +1.4% |
+| **$0.20** | **73.3%** | **+0.7% (BEST)** |
+
+**Final threshold: $0.20** - gives 73.3% pile-on (closest to 72.6% reference).
+
+### Expected Impact
+
+| Metric | Before | After Phase 2 |
+|--------|--------|---------------|
+| Bot pile-on rate | 9.1% | **~75-82%** |
+| Reference pile-on rate | 72.6% | - |
+| DIRECTIONAL_EXPENSIVE fires | 5 | **Many** |
+| Expensive buys without cheap | Rare | **Common** |
+
+---
+
+## MID_HEDGE SIGNAL (IMPLEMENTED ✓ - 2026-01-30 21:25 UTC)
+
+### Problem Identified
+
+Real-time comparison showed massive mid-range gap:
+- **REF**: C=35% M=35% E=29%
+- **BOT**: C=42% M=9% E=49%
+
+Bot was only getting **1 mid-range trade** out of 156 while reference had 55.
+
+### Historical Data Verification - FULL DATASET (30,333 buys, 11,906 mid-range)
+
+**68.6% of all mid-range buys occur when expensive exists in same window!**
+
+| Scenario | Mid-range buys | Percentage |
+|----------|---------------|------------|
+| With expensive in window | 8,173 | **68.6%** |
+| Mid-only window | 3,719 | 31.2% |
+| With cheap in window | 14 | 0.1% |
+
+**Mid prices when expensive exists:**
+- Median: $0.480
+- Mean: $0.472
+- 54.4% under $0.50
+
+### Fix Applied
+
+```python
+# NEW config:
+MID_HEDGE_MIN_PRICE: float = 0.30    # Minimum mid price
+MID_HEDGE_MAX_PRICE: float = 0.60    # Maximum mid price
+MID_HEDGE_OTHER_MIN: float = 0.60    # Other side must be expensive
+
+# NEW signal (after DIRECTIONAL_EXPENSIVE):
+if not up_signal_type and CONFIG.MID_HEDGE_MIN_PRICE <= market.up_price <= CONFIG.MID_HEDGE_MAX_PRICE:
+    if market.down_price >= CONFIG.MID_HEDGE_OTHER_MIN:
+        if market.pair_cost <= CONFIG.MAX_PAIR_COST:
+            up_signal_type = "MID_HEDGE"
+
+# Same for down side
+```
+
+### Expected Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Bot mid-range % | 9% | **~35%** |
+| MID_HEDGE signals | 0 | **Many** |
+| Missing mid-range pattern | 68.6% | **Captured** |
+
+---
+
+## PILE-ON BLOCKING LOGIC REMOVED (CRITICAL FIX - 2026-01-30 21:58 UTC)
+
+### Problem: Blocking Logic Was Fundamentally Wrong
+
+The conditional AGGRESSIVE logic (Phase 2 above) was blocking cheap buys when other side was expensive. This was based on a misunderstanding of the pile-on pattern.
+
+**Original (WRONG) assumption:**
+- Reference "chooses" to skip cheap when expensive is available
+- We should mimic this by blocking cheap buys
+
+**Actual behavior discovered through comprehensive analysis:**
+
+### Full Historical Verification (39,791 buys, 2,112 windows)
+
+**Windows with expensive buys:** 1,355 total
+- Pile-on (no cheap bought): 886 (65.4%)
+- Hedge (cheap bought): 469 (34.6%)
+
+**CRITICAL FINDING: In ALL 886 pile-on windows:**
+- **0 windows (0.0%)** had cheap (<$0.30) available but skipped
+- Minimum price bought: median $0.988, mean $0.933
+- 95.9% of pile-on windows had minimum price >= $0.70
+
+| Min Price in Pile-on Windows | Count | Percentage |
+|------------------------------|-------|------------|
+| < $0.30 (would indicate skip) | 0 | **0.0%** |
+| $0.30 - $0.50 | 30 | 3.4% |
+| $0.50 - $0.70 | 6 | 0.7% |
+| >= $0.70 | 850 | **95.9%** |
+
+### Conclusion: Reference NEVER Skips Cheap
+
+The 65% pile-on rate is because **cheap was never available** in those windows, NOT because reference chose not to buy it. When cheap is available, reference ALWAYS buys it.
+
+### Fix Applied
+
+Removed the blocking logic entirely:
+
+```python
+# BEFORE (WRONG):
+if market.up_price < aggressive_threshold:
+    other_side_expensive = market.down_price >= CONFIG.PILE_ON_EXPENSIVE_MIN
+    is_super_cheap = market.up_price < CONFIG.SUPER_CHEAP_THRESHOLD
+
+    if other_side_expensive and not is_super_cheap:
+        # Skip cheap - let DIRECTIONAL_EXPENSIVE handle expensive side
+        pass
+    elif market.pair_cost <= CONFIG.MAX_PAIR_COST:
+        up_signal_type = "AGGRESSIVE"
+
+# AFTER (CORRECT):
+if market.up_price < aggressive_threshold:
+    # Historical data shows ref NEVER skips cheap when available
+    # Pile-on happens when cheap is not offered, not by choice
+    if market.pair_cost <= CONFIG.MAX_PAIR_COST:
+        up_signal_type = "AGGRESSIVE"
+```
+
+### Expected Impact
+
+| Metric | Before Fix | After Fix |
+|--------|------------|-----------|
+| Cheap buys blocked | 37.8% | **0%** |
+| Cheap alignment with ref | ~62% | **~100%** |
+| Pile-on behavior | Forced by blocking | Natural (market-driven) |
+
+**Key insight**: The pile-on pattern emerges naturally when cheap isn't available. We don't need to force it by blocking trades.
+
+---
+
+## BALANCED_MAX_PAIR_COST ANALYSIS (VERIFIED ✓ - 2026-01-30 22:00 UTC)
+
+### Full Dataset Analysis (12,186 trades, 934 windows)
+
+**CORRECTION**: Earlier analysis on truncated data was wrong. Full data shows:
+
+**Reference both-sides mid-range pair costs (113 windows):**
+- Median: **$1.003** (NOT $0.92!)
+- Mean: $0.969
+- 30.1% have pair cost <= $0.95
+- 83.2% have pair cost <= $1.02
+- 49.6% have pair cost <= $1.00
+
+**Impact of threshold change:**
+- At 1.02: 94 windows captured
+- At 0.95: 34 windows captured
+- **Missed by lowering: 60 windows (63.8% of valid)**
+
+### Conclusion: KEEP AT $1.02
+
+```python
+# KEEP at 1.02 - full data shows median is $1.003
+BALANCED_MAX_PAIR_COST: float = 1.02
+```
+
+Lowering to $0.95 would block 63.8% of valid both-sides mid buys.
+
+---
+
 ## HEDGE_MATCH MINIMUM PRICE FIX (IMPLEMENTED ✓ - 2026-01-30 18:44 UTC)
 
 ### Problem Identified
