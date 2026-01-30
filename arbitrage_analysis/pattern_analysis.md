@@ -1895,6 +1895,76 @@ if not up_signal_type and CONFIG.MID_HEDGE_MIN_PRICE <= market.up_price <= CONFI
 
 ---
 
+## PILE-ON BLOCKING LOGIC REMOVED (CRITICAL FIX - 2026-01-30 21:58 UTC)
+
+### Problem: Blocking Logic Was Fundamentally Wrong
+
+The conditional AGGRESSIVE logic (Phase 2 above) was blocking cheap buys when other side was expensive. This was based on a misunderstanding of the pile-on pattern.
+
+**Original (WRONG) assumption:**
+- Reference "chooses" to skip cheap when expensive is available
+- We should mimic this by blocking cheap buys
+
+**Actual behavior discovered through comprehensive analysis:**
+
+### Full Historical Verification (39,791 buys, 2,112 windows)
+
+**Windows with expensive buys:** 1,355 total
+- Pile-on (no cheap bought): 886 (65.4%)
+- Hedge (cheap bought): 469 (34.6%)
+
+**CRITICAL FINDING: In ALL 886 pile-on windows:**
+- **0 windows (0.0%)** had cheap (<$0.30) available but skipped
+- Minimum price bought: median $0.988, mean $0.933
+- 95.9% of pile-on windows had minimum price >= $0.70
+
+| Min Price in Pile-on Windows | Count | Percentage |
+|------------------------------|-------|------------|
+| < $0.30 (would indicate skip) | 0 | **0.0%** |
+| $0.30 - $0.50 | 30 | 3.4% |
+| $0.50 - $0.70 | 6 | 0.7% |
+| >= $0.70 | 850 | **95.9%** |
+
+### Conclusion: Reference NEVER Skips Cheap
+
+The 65% pile-on rate is because **cheap was never available** in those windows, NOT because reference chose not to buy it. When cheap is available, reference ALWAYS buys it.
+
+### Fix Applied
+
+Removed the blocking logic entirely:
+
+```python
+# BEFORE (WRONG):
+if market.up_price < aggressive_threshold:
+    other_side_expensive = market.down_price >= CONFIG.PILE_ON_EXPENSIVE_MIN
+    is_super_cheap = market.up_price < CONFIG.SUPER_CHEAP_THRESHOLD
+
+    if other_side_expensive and not is_super_cheap:
+        # Skip cheap - let DIRECTIONAL_EXPENSIVE handle expensive side
+        pass
+    elif market.pair_cost <= CONFIG.MAX_PAIR_COST:
+        up_signal_type = "AGGRESSIVE"
+
+# AFTER (CORRECT):
+if market.up_price < aggressive_threshold:
+    # Historical data shows ref NEVER skips cheap when available
+    # Pile-on happens when cheap is not offered, not by choice
+    if market.pair_cost <= CONFIG.MAX_PAIR_COST:
+        up_signal_type = "AGGRESSIVE"
+```
+
+### Expected Impact
+
+| Metric | Before Fix | After Fix |
+|--------|------------|-----------|
+| Cheap buys blocked | 37.8% | **0%** |
+| Cheap alignment with ref | ~62% | **~100%** |
+| Pile-on behavior | Forced by blocking | Natural (market-driven) |
+
+**Key insight**: The pile-on pattern emerges naturally when cheap isn't available. We don't need to force it by blocking trades.
+
+---
+
 ## BALANCED_MAX_PAIR_COST ANALYSIS (VERIFIED ✓ - 2026-01-30 22:00 UTC)
 
 ### Full Dataset Analysis (12,186 trades, 934 windows)
