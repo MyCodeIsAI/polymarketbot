@@ -1705,6 +1705,37 @@ Cheap buying is still above target. This may be due to:
 
 ---
 
+## AGGRESSIVE PAIR COST FIX (IMPLEMENTED ✓ - 2026-01-30 19:30 UTC)
+
+### Problem Identified
+
+AGGRESSIVE signals were blocked when existing position had high average price. Example:
+- Holding Up at $2.50 avg price
+- Market: Down=$0.10 (cheap hedge opportunity)
+- Projected pair = $2.50 + $0.10 = $2.60 > MAX_PAIR_COST ($1.02)
+- **AGGRESSIVE blocked** even though market pair was $1.01
+
+This caused bot to have 0% cheap buys while reference had 26% in same window.
+
+### Fix Applied
+
+```python
+# OLD (blocked by projected pair):
+if market.down_price < aggressive_threshold:
+    if projected_pair_if_buy_down < CONFIG.MAX_PAIR_COST:
+        down_signal_type = "AGGRESSIVE"
+
+# NEW (uses market pair):
+if market.down_price < aggressive_threshold:
+    # Use MARKET pair cost, not projected - buy cheap hedges regardless of position cost basis
+    if market.pair_cost <= CONFIG.MAX_PAIR_COST:
+        down_signal_type = "AGGRESSIVE"
+```
+
+**Rationale**: Reference buys cheap hedges regardless of existing position cost basis. The market pair cost ($1.01) is what matters, not the projected pair based on old positions.
+
+---
+
 ## HEDGE_MATCH MINIMUM PRICE FIX (IMPLEMENTED ✓ - 2026-01-30 18:44 UTC)
 
 ### Problem Identified
