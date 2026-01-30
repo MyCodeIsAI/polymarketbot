@@ -2,23 +2,21 @@
 """
 Long-running side-by-side trade comparison logger.
 
-Captures both reference account and bot trades in real-time, logging them
-side-by-side with clear cycle breaks for easy auditing.
+Uses EXISTING reference trade collector data and bot signals.
 
 Output: Creates timestamped log files in ./comparison_logs/
 
 Usage:
-    python compare_trades_logger.py --reference-wallet 0x... --bot-server http://localhost:8000
+    python compare_trades_logger.py
 
-The script will run until interrupted (Ctrl+C), creating detailed logs that can be
-analyzed later to understand exactly how the bot differs from reference.
+Run with nohup for long sessions:
+    nohup python compare_trades_logger.py > comparison_logs/logger.out 2>&1 &
 """
 
-import argparse
 import asyncio
 import json
 import os
-import sys
+import re
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -32,15 +30,16 @@ import aiohttp
 # Configuration
 # =============================================================================
 
-REFERENCE_WALLET = os.environ.get("REFERENCE_WALLET", "")
-BOT_SERVER = os.environ.get("BOT_SERVER", "http://localhost:8000")
+# Reference trade data
+REFERENCE_WALLET = "0x93c22116e4402c9332ee6db578050e688934c072"
+DATA_API = "https://data-api.polymarket.com"
+BOT_SERVER = "http://localhost:8765"
 LOG_DIR = Path("./comparison_logs")
-GAMMA_API = "https://gamma-api.polymarket.com"
 
 # Poll intervals
-REFERENCE_POLL_INTERVAL = 2.0  # seconds
-BOT_POLL_INTERVAL = 1.0  # seconds
-CYCLE_BOUNDARY_THRESHOLD = 30.0  # seconds gap = new cycle
+POLL_INTERVAL = 2.0  # seconds
+STATUS_INTERVAL = 60.0  # Print status every minute
+SUMMARY_INTERVAL = 300.0  # Save summary every 5 minutes
 
 # =============================================================================
 # Data Classes
@@ -48,28 +47,40 @@ CYCLE_BOUNDARY_THRESHOLD = 30.0  # seconds gap = new cycle
 
 @dataclass
 class Trade:
-    """Unified trade representation."""
+    """Unified trade representation with full audit data."""
     timestamp: float
-    source: str  # "REFERENCE" or "BOT"
+    source: str  # "REF" or "BOT"
     condition_id: str
     outcome: str  # "Up" or "Down"
     side: str  # "BUY" or "SELL"
     price: float
     size: float
     slug: str = ""
-    asset: str = ""  # e.g., "BTC", "ETH"
-    raw: dict = field(default_factory=dict)
+    asset: str = ""
+
+    # Audit fields
+    window_offset: float = 0.0
+    signal_type: str = ""
+    is_15m_crypto: bool = False
+
+    # Decision tracking
+    decision_type: str = ""  # NEW, FILL, DOUBLE_DOWN, SWITCH, RAPID_DBL
+    prev_outcome: str = ""
+    gap_from_prev: float = 0.0
+    price_change: float = 0.0
 
 
 @dataclass
-class Cycle:
-    """A trading cycle (window) with trades from both sources."""
-    cycle_id: int
-    start_time: float
-    end_time: float = 0
+class Window:
+    """A trading window with trades from both sources - keyed by condition_id."""
+    window_id: int
+    condition_id: str  # Primary key - same across REF and BOT
+    slug: str  # Display slug (may differ between sources)
+    asset: str
+    window_start: float
+    first_trade_time: float
     reference_trades: List[Trade] = field(default_factory=list)
     bot_trades: List[Trade] = field(default_factory=list)
-    slug: str = ""
 
 
 # =============================================================================
@@ -78,123 +89,211 @@ class Cycle:
 
 @dataclass
 class LoggerState:
-    """Global state for the logger."""
-    cycles: Dict[str, Cycle] = field(default_factory=dict)  # slug -> Cycle
-    current_cycle_id: int = 0
-    seen_reference_ids: Set[str] = field(default_factory=set)
+    windows: Dict[str, Window] = field(default_factory=dict)
+    current_window_id: int = 0
+    seen_reference_hashes: Set[str] = field(default_factory=set)
     seen_bot_ids: Set[str] = field(default_factory=set)
-    last_reference_trade_time: float = 0
-    last_bot_trade_time: float = 0
+    last_ref_trade: Dict[str, Trade] = field(default_factory=dict)
+    last_bot_trade: Dict[str, Trade] = field(default_factory=dict)
+    total_ref_trades: int = 0
+    total_bot_trades: int = 0
+    total_ref_decisions: int = 0
+    total_bot_decisions: int = 0
     log_file: Optional[Path] = None
     summary_file: Optional[Path] = None
+    trades_jsonl: Optional[Path] = None
+    start_time: float = 0
+    last_ref_check: float = 0
 
 
 STATE = LoggerState()
 
 
 # =============================================================================
-# Logging Helpers
+# Helpers
+# =============================================================================
+
+def extract_window_start(slug: str) -> Optional[float]:
+    """Extract window start timestamp from slug like 'btc-updown-15m-1769756400'."""
+    match = re.search(r'-(\d{10})$', slug)
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def is_15m_crypto(slug: str) -> bool:
+    """Check if slug is a 15-minute crypto window."""
+    slug_lower = slug.lower()
+    # Reference format: "btc-updown-15m-1769756400"
+    if "-15m-" in slug_lower:
+        return True
+    # Bot format: "bitcoin-up-or-down---january-30,-2:30am-2:45am-et"
+    # Contains crypto name and 15-minute time range (e.g., "2:30am-2:45am")
+    crypto_names = ["bitcoin", "ethereum", "solana", "xrp", "dogecoin", "cardano", "avalanche"]
+    has_crypto = any(c in slug_lower for c in crypto_names)
+    # Check for 15-min time range pattern (e.g., "2:30am-2:45am" or "2:15am-2:30am")
+    has_15m_range = bool(re.search(r'\d{1,2}:\d{2}[ap]m-\d{1,2}:\d{2}[ap]m', slug_lower))
+    return has_crypto and has_15m_range
+
+
+def get_asset(slug: str) -> str:
+    if not slug:
+        return "UNK"
+    parts = slug.split("-")
+    return parts[0].upper()[:3] if parts else "UNK"
+
+
+def format_ts(ts: float) -> str:
+    return datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+
+
+def format_full_ts(ts: float) -> str:
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
+# =============================================================================
+# Logging
 # =============================================================================
 
 def init_log_files():
-    """Initialize log files with timestamp."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    STATE.log_file = LOG_DIR / f"trades_{timestamp}.log"
+    STATE.log_file = LOG_DIR / f"comparison_{timestamp}.log"
     STATE.summary_file = LOG_DIR / f"summary_{timestamp}.json"
+    STATE.trades_jsonl = LOG_DIR / f"trades_{timestamp}.jsonl"
+    STATE.start_time = time.time()
 
+    header = f"""
+{'='*120}
+TRADE COMPARISON LOGGER
+{'='*120}
+Started: {datetime.now().isoformat()}
+Reference Wallet: {REFERENCE_WALLET}
+Data API: {DATA_API}
+Bot Server: {BOT_SERVER}
+{'='*120}
+
+LEGEND:
+  Source: REF=Reference, BOT=Bot
+  Decision Types:
+    NEW        = First trade for this outcome in window
+    FILL       = Order fill (gap<=2s, price_change<$0.02)
+    DOUBLE_DOWN= Same outcome, valid (gap>=6s OR price>=$0.03)
+    SWITCH     = Different outcome from previous
+    RAPID_DBL  = Same outcome, TOO FAST (gap<6s AND price<$0.03) ⚠️
+
+{'='*120}
+"""
     with open(STATE.log_file, "w") as f:
-        f.write("=" * 100 + "\n")
-        f.write(f"TRADE COMPARISON LOG - Started {datetime.now().isoformat()}\n")
-        f.write(f"Reference Wallet: {REFERENCE_WALLET}\n")
-        f.write(f"Bot Server: {BOT_SERVER}\n")
-        f.write("=" * 100 + "\n\n")
-
-    print(f"Logging to: {STATE.log_file}")
-    print(f"Summary to: {STATE.summary_file}")
+        f.write(header)
+    print(header)
+    print(f"Log: {STATE.log_file}")
+    print(f"JSONL: {STATE.trades_jsonl}")
 
 
-def log_line(line: str, also_print: bool = True):
-    """Write a line to the log file and optionally print."""
+def log(msg: str, also_print: bool = True):
     if STATE.log_file:
         with open(STATE.log_file, "a") as f:
-            f.write(line + "\n")
+            f.write(msg + "\n")
     if also_print:
-        print(line)
+        print(msg)
 
 
-def log_cycle_start(cycle: Cycle):
-    """Log the start of a new trading cycle."""
-    log_line("")
-    log_line("=" * 100)
-    log_line(f"CYCLE {cycle.cycle_id} START - {cycle.slug}")
-    log_line(f"Time: {datetime.fromtimestamp(cycle.start_time).isoformat()}")
-    log_line("=" * 100)
-    log_line("")
-    log_line(f"{'TIMESTAMP':<24} {'SOURCE':<10} {'ASSET':<5} {'SIDE':<5} {'OUTCOME':<6} {'PRICE':<8} {'SIZE':<10} {'DECISION'}")
-    log_line("-" * 100)
+def log_trade_jsonl(trade: Trade):
+    if STATE.trades_jsonl:
+        record = {
+            "timestamp": trade.timestamp,
+            "source": trade.source,
+            "slug": trade.slug,
+            "asset": trade.asset,
+            "condition_id": trade.condition_id,
+            "outcome": trade.outcome,
+            "side": trade.side,
+            "price": trade.price,
+            "size": trade.size,
+            "window_offset": trade.window_offset,
+            "is_15m_crypto": trade.is_15m_crypto,
+            "decision_type": trade.decision_type,
+            "prev_outcome": trade.prev_outcome,
+            "gap_from_prev": trade.gap_from_prev,
+            "price_change": trade.price_change,
+        }
+        with open(STATE.trades_jsonl, "a") as f:
+            f.write(json.dumps(record) + "\n")
 
 
-def log_trade(trade: Trade, decision_info: str = ""):
-    """Log a single trade."""
-    ts_str = datetime.fromtimestamp(trade.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-    source_color = "REF" if trade.source == "REFERENCE" else "BOT"
-    log_line(
-        f"{ts_str:<24} {source_color:<10} {trade.asset:<5} {trade.side:<5} {trade.outcome:<6} "
-        f"${trade.price:<7.3f} {trade.size:<10.1f} {decision_info}"
-    )
+def log_window_start(window: Window):
+    log("")
+    log("=" * 120)
+    log(f"WINDOW {window.window_id}: {window.condition_id[:30]}...")
+    log(f"Slug: {window.slug} | Asset: {window.asset}")
+    log(f"Start: {format_full_ts(window.window_start)} | First Trade: {format_full_ts(window.first_trade_time)}")
+    log("=" * 120)
+    log("")
+    log(f"{'TIME':<10} {'SRC':<4} {'SIDE':<5} {'OUT':<5} {'PRICE':<8} {'SIZE':<8} {'OFFSET':<8} {'DECISION':<12} {'DETAILS'}")
+    log("-" * 120)
 
 
-def log_cycle_summary(cycle: Cycle):
-    """Log summary at end of cycle."""
-    log_line("")
-    log_line("-" * 100)
-    log_line(f"CYCLE {cycle.cycle_id} SUMMARY")
-    log_line(f"  Reference trades: {len(cycle.reference_trades)}")
-    log_line(f"  Bot trades: {len(cycle.bot_trades)}")
+def log_trade(trade: Trade):
+    time_str = format_ts(trade.timestamp)
+    offset_str = f"{trade.window_offset:.0f}s" if trade.window_offset > 0 else "-"
 
-    # Calculate decisions for reference
-    ref_decisions = count_decisions(cycle.reference_trades)
-    bot_decisions = count_decisions(cycle.bot_trades)
+    details = ""
+    if trade.decision_type == "FILL":
+        details = f"gap={trade.gap_from_prev:.1f}s Δp=${trade.price_change:.3f}"
+    elif trade.decision_type == "DOUBLE_DOWN":
+        gate = "TIME" if trade.gap_from_prev >= 6 else "PRICE"
+        details = f"{gate}: gap={trade.gap_from_prev:.1f}s Δp=${trade.price_change:.3f}"
+    elif trade.decision_type == "SWITCH":
+        details = f"{trade.prev_outcome}→{trade.outcome} gap={trade.gap_from_prev:.1f}s"
+    elif trade.decision_type == "RAPID_DBL":
+        details = f"⚠️ gap={trade.gap_from_prev:.1f}s<6s AND Δp=${trade.price_change:.3f}<$0.03"
 
-    log_line(f"  Reference decisions: {ref_decisions}")
-    log_line(f"  Bot decisions: {bot_decisions}")
+    flag = ""
+    if trade.source == "BOT" and trade.decision_type == "RAPID_DBL":
+        flag = " <<<< SHOULD BE BLOCKED"
 
-    ratio = len(cycle.bot_trades) / max(len(cycle.reference_trades), 1)
-    decision_ratio = bot_decisions / max(ref_decisions, 1)
+    log(f"{time_str:<10} {trade.source:<4} {trade.side:<5} {trade.outcome:<5} ${trade.price:<7.3f} {trade.size:<8.1f} {offset_str:<8} {trade.decision_type:<12} {details}{flag}")
+    log_trade_jsonl(trade)
 
-    log_line(f"  Trade ratio (bot/ref): {ratio:.2f}x")
-    log_line(f"  Decision ratio (bot/ref): {decision_ratio:.2f}x")
 
-    if ratio > 1.5:
-        log_line(f"  ⚠️  BOT OVER-TRADING by {(ratio-1)*100:.0f}%")
-    elif ratio < 0.7:
-        log_line(f"  ⚠️  BOT UNDER-TRADING by {(1-ratio)*100:.0f}%")
-    else:
-        log_line(f"  ✓  Bot within acceptable range")
+def log_window_summary(window: Window):
+    ref_buys = [t for t in window.reference_trades if t.side == "BUY"]
+    bot_buys = [t for t in window.bot_trades if t.side == "BUY"]
+    ref_decisions = count_decisions(ref_buys)
+    bot_decisions = count_decisions(bot_buys)
 
-    log_line("")
+    log("")
+    log("-" * 120)
+    log(f"WINDOW {window.window_id} SUMMARY: {window.slug}")
+    log(f"  Reference: {len(ref_buys)} buys, {ref_decisions} decisions")
+    log(f"  Bot:       {len(bot_buys)} buys, {bot_decisions} decisions")
+
+    if ref_buys:
+        trade_ratio = len(bot_buys) / len(ref_buys)
+        decision_ratio = bot_decisions / max(ref_decisions, 1)
+        log(f"  Trade ratio:    {trade_ratio:.2f}x")
+        log(f"  Decision ratio: {decision_ratio:.2f}x")
+
+        if trade_ratio > 1.3:
+            log(f"  ⚠️  BOT OVER-TRADING by {(trade_ratio-1)*100:.0f}%")
+        elif trade_ratio < 0.7:
+            log(f"  ⚠️  BOT UNDER-TRADING by {(1-trade_ratio)*100:.0f}%")
+        else:
+            log(f"  ✓ Within acceptable range")
+
+    bot_rapid = sum(1 for t in bot_buys if t.decision_type == "RAPID_DBL")
+    if bot_rapid > 0:
+        log(f"  ⚠️  {bot_rapid} RAPID_DBL trades that should have been blocked!")
+    log("")
 
 
 def count_decisions(trades: List[Trade]) -> int:
-    """
-    Count distinct trading decisions from a list of trades.
-    A new decision is triggered by:
-    - Gap > 2s
-    - Price change > $0.02
-    - Outcome change
-    """
     if not trades:
         return 0
-
-    buys = sorted([t for t in trades if t.side == "BUY"], key=lambda x: x.timestamp)
-    if not buys:
-        return 0
-
     decisions = 0
     current = None
-
-    for trade in buys:
+    for trade in sorted(trades, key=lambda t: t.timestamp):
         is_new = False
         if current is None:
             is_new = True
@@ -204,170 +303,207 @@ def count_decisions(trades: List[Trade]) -> int:
             outcome_change = trade.outcome != current["outcome"]
             if gap > 2 or price_change > 0.02 or outcome_change:
                 is_new = True
-
         if is_new:
             decisions += 1
-            current = {
-                "last_ts": trade.timestamp,
-                "price": trade.price,
-                "outcome": trade.outcome,
-            }
+            current = {"last_ts": trade.timestamp, "price": trade.price, "outcome": trade.outcome}
         else:
             current["last_ts"] = trade.timestamp
-
     return decisions
 
 
 # =============================================================================
-# Reference Account Monitoring
+# Decision Analysis
+# =============================================================================
+
+def analyze_decision(trade: Trade, source: str) -> None:
+    tracking = STATE.last_ref_trade if source == "REF" else STATE.last_bot_trade
+    prev = tracking.get(trade.condition_id)
+
+    if prev is None:
+        trade.decision_type = "NEW"
+    else:
+        trade.gap_from_prev = trade.timestamp - prev.timestamp
+        trade.price_change = abs(trade.price - prev.price)
+        trade.prev_outcome = prev.outcome
+        outcome_change = trade.outcome != prev.outcome
+        same_outcome = trade.outcome == prev.outcome
+
+        if outcome_change:
+            trade.decision_type = "SWITCH"
+        elif trade.gap_from_prev <= 2 and trade.price_change < 0.02:
+            trade.decision_type = "FILL"
+        elif same_outcome:
+            time_gate = trade.gap_from_prev >= 6
+            price_gate = trade.price_change >= 0.03
+            if time_gate or price_gate:
+                trade.decision_type = "DOUBLE_DOWN"
+            else:
+                trade.decision_type = "RAPID_DBL"
+        else:
+            trade.decision_type = "NEW"
+
+    tracking[trade.condition_id] = trade
+
+    if source == "REF":
+        STATE.total_ref_trades += 1
+        if trade.decision_type not in ["FILL"]:
+            STATE.total_ref_decisions += 1
+    else:
+        STATE.total_bot_trades += 1
+        if trade.decision_type not in ["FILL"]:
+            STATE.total_bot_decisions += 1
+
+
+# =============================================================================
+# Reference Monitoring (from data-api)
 # =============================================================================
 
 async def fetch_reference_trades(session: aiohttp.ClientSession) -> List[Trade]:
-    """Fetch recent trades from reference account."""
-    if not REFERENCE_WALLET:
-        return []
-
+    """Fetch trades from the Polymarket data-api for reference wallet."""
     try:
-        url = f"{GAMMA_API}/activity?user={REFERENCE_WALLET}&limit=100"
+        url = f"{DATA_API}/activity?user={REFERENCE_WALLET}&limit=200"
         async with session.get(url, timeout=10) as resp:
             if resp.status != 200:
+                log(f"Reference API error: {resp.status}")
                 return []
             data = await resp.json()
     except Exception as e:
-        print(f"Error fetching reference trades: {e}")
+        log(f"Error fetching reference trades: {e}")
         return []
 
     trades = []
+    now = time.time()
+    cutoff = now - 3600  # Only process trades from last hour
+
     for item in data:
         try:
-            trade_id = item.get("id", "")
-            if trade_id in STATE.seen_reference_ids:
+            tx_hash = item.get("transactionHash", "")
+            if not tx_hash or tx_hash in STATE.seen_reference_hashes:
                 continue
-            STATE.seen_reference_ids.add(trade_id)
 
-            # Parse trade
-            ts = item.get("timestamp", 0)
-            if isinstance(ts, str):
-                ts = datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+            # Parse timestamp - API returns ISO format or unix
+            ts_raw = item.get("timestamp", 0)
+            if isinstance(ts_raw, str):
+                try:
+                    ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")).timestamp()
+                except:
+                    ts = float(ts_raw) if ts_raw.isdigit() else time.time()
+            else:
+                ts = float(ts_raw)
 
+            if ts < cutoff:
+                continue  # Skip old trades
+
+            STATE.seen_reference_hashes.add(tx_hash)
+
+            # Determine side from maker/taker perspective
             side = item.get("side", "").upper()
+            # The API might use "buy"/"sell" or we need to infer from type
+            if not side:
+                trade_type = item.get("type", "")
+                if trade_type in ["buy", "BUY"]:
+                    side = "BUY"
+                elif trade_type in ["sell", "SELL"]:
+                    side = "SELL"
             if side not in ["BUY", "SELL"]:
                 continue
 
-            # Determine our perspective (reference is the taker)
-            our_side = side
-            if item.get("type") == "MATCH":
-                # If maker, flip the side
-                our_side = "SELL" if side == "BUY" else "BUY"
+            slug = item.get("slug", "") or item.get("eventSlug", "") or item.get("market_slug", "")
+            if not is_15m_crypto(slug):
+                continue  # Only 15m crypto windows
 
-            slug = item.get("market", {}).get("slug", "")
-            asset = slug.split("-")[0].upper()[:3] if slug else "UNK"
+            window_start = extract_window_start(slug)
+            window_offset = (ts - window_start) if window_start else 0
 
             trade = Trade(
                 timestamp=ts,
-                source="REFERENCE",
-                condition_id=item.get("conditionId", ""),
+                source="REF",
+                condition_id=item.get("conditionId", "") or item.get("condition_id", ""),
                 outcome=item.get("outcome", ""),
-                side=our_side,
+                side=side,
                 price=float(item.get("price", 0)),
-                size=float(item.get("size", 0)),
+                size=float(item.get("size", 0) or item.get("amount", 0)),
                 slug=slug,
-                asset=asset,
-                raw=item,
+                asset=get_asset(slug),
+                window_offset=window_offset,
+                is_15m_crypto=True,
             )
             trades.append(trade)
         except Exception as e:
-            print(f"Error parsing reference trade: {e}")
             continue
 
-    return trades
+    return sorted(trades, key=lambda t: t.timestamp)
 
 
 async def monitor_reference(session: aiohttp.ClientSession):
-    """Continuously monitor reference account for new trades."""
+    """Monitor reference trades by fetching from data-api."""
     while True:
         try:
             trades = await fetch_reference_trades(session)
 
             for trade in trades:
-                # Check if this starts a new cycle
-                slug = trade.slug
-                if slug not in STATE.cycles:
-                    STATE.current_cycle_id += 1
-                    cycle = Cycle(
-                        cycle_id=STATE.current_cycle_id,
-                        start_time=trade.timestamp,
-                        slug=slug,
+                cond_id = trade.condition_id
+                if not cond_id:
+                    continue
+
+                if cond_id not in STATE.windows:
+                    STATE.current_window_id += 1
+                    window_start = extract_window_start(trade.slug) or trade.timestamp
+                    window = Window(
+                        window_id=STATE.current_window_id,
+                        condition_id=cond_id,
+                        slug=trade.slug,
+                        asset=trade.asset,
+                        window_start=window_start,
+                        first_trade_time=trade.timestamp,
                     )
-                    STATE.cycles[slug] = cycle
-                    log_cycle_start(cycle)
+                    STATE.windows[cond_id] = window
+                    log_window_start(window)
 
-                cycle = STATE.cycles[slug]
-
-                # Check for cycle boundary (long gap)
-                if cycle.reference_trades:
-                    last_ts = cycle.reference_trades[-1].timestamp
-                    if trade.timestamp - last_ts > CYCLE_BOUNDARY_THRESHOLD:
-                        # End old cycle
-                        cycle.end_time = last_ts
-                        log_cycle_summary(cycle)
-
-                        # Start new cycle
-                        STATE.current_cycle_id += 1
-                        cycle = Cycle(
-                            cycle_id=STATE.current_cycle_id,
-                            start_time=trade.timestamp,
-                            slug=slug,
-                        )
-                        STATE.cycles[slug] = cycle
-                        log_cycle_start(cycle)
-
-                # Add trade to cycle
-                cycle.reference_trades.append(trade)
-                STATE.last_reference_trade_time = trade.timestamp
-
-                # Determine if this is a new decision or continuation
-                decision_info = analyze_decision(trade, cycle.reference_trades, "REFERENCE")
-                log_trade(trade, decision_info)
+                window = STATE.windows[cond_id]
+                analyze_decision(trade, "REF")
+                window.reference_trades.append(trade)
+                log_trade(trade)
 
         except Exception as e:
-            print(f"Reference monitor error: {e}")
+            log(f"Reference monitor error: {e}")
 
-        await asyncio.sleep(REFERENCE_POLL_INTERVAL)
+        await asyncio.sleep(POLL_INTERVAL)
 
 
 # =============================================================================
 # Bot Monitoring
 # =============================================================================
 
-async def fetch_bot_trades(session: aiohttp.ClientSession) -> List[Trade]:
-    """Fetch recent trades from bot server."""
+async def fetch_bot_signals(session: aiohttp.ClientSession) -> List[Trade]:
     try:
-        url = f"{BOT_SERVER}/api/signals"
+        url = f"{BOT_SERVER}/arbitrage/api/signals"
         async with session.get(url, timeout=5) as resp:
             if resp.status != 200:
                 return []
             data = await resp.json()
-    except Exception as e:
-        # Bot might not be running
+    except Exception:
         return []
 
     trades = []
+    now = time.time()
+    cutoff = now - 3600  # Last hour
+
     for item in data:
         try:
-            # Create unique ID from signal data
-            trade_id = f"{item.get('timestamp', '')}_{item.get('condition_id', '')}_{item.get('outcome', '')}"
+            ts_str = item.get("timestamp", "")
+            cond_id = item.get("condition_id", "")
+            outcome = item.get("outcome", "")
+            trade_id = f"{ts_str}_{cond_id}_{outcome}"
+
             if trade_id in STATE.seen_bot_ids:
                 continue
             STATE.seen_bot_ids.add(trade_id)
 
-            # Only include executed trades (not skipped)
             action = item.get("action", "")
             if action not in ["BUY", "EXECUTE"]:
                 continue
 
-            # Parse timestamp
-            ts_str = item.get("timestamp", "")
             if isinstance(ts_str, str):
                 try:
                     ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
@@ -376,189 +512,157 @@ async def fetch_bot_trades(session: aiohttp.ClientSession) -> List[Trade]:
             else:
                 ts = float(ts_str) if ts_str else time.time()
 
-            slug = item.get("market_title", "").lower().replace(" ", "-")
-            asset = slug.split("-")[0].upper()[:3] if slug else "UNK"
+            if ts < cutoff:
+                continue
+
+            # Get slug from market_title - extract the actual slug
+            title = item.get("market_title", "")
+            # Try to find the slug pattern
+            slug = ""
+            if "-15m-" in title.lower():
+                slug = title.lower().replace(" ", "-")
+            else:
+                # Try to construct from title
+                slug = title.lower().replace(" ", "-")
+
+            if not is_15m_crypto(slug):
+                continue
+
+            window_start = extract_window_start(slug)
+            window_offset = (ts - window_start) if window_start else 0
 
             trade = Trade(
                 timestamp=ts,
                 source="BOT",
-                condition_id=item.get("condition_id", ""),
-                outcome=item.get("outcome", ""),
-                side="BUY",  # Bot signals are buys
+                condition_id=cond_id,
+                outcome=outcome,
+                side="BUY",
                 price=float(item.get("price", 0)),
                 size=float(item.get("size", 0)) if "size" in item else 0,
                 slug=slug,
-                asset=asset,
-                raw=item,
+                asset=get_asset(slug),
+                window_offset=window_offset,
+                signal_type=item.get("signal_type", ""),
+                is_15m_crypto=True,
             )
             trades.append(trade)
-        except Exception as e:
-            print(f"Error parsing bot trade: {e}")
+        except Exception:
             continue
 
-    return trades
+    return sorted(trades, key=lambda t: t.timestamp)
 
 
 async def monitor_bot(session: aiohttp.ClientSession):
-    """Continuously monitor bot for new trades."""
     while True:
         try:
-            trades = await fetch_bot_trades(session)
+            trades = await fetch_bot_signals(session)
 
             for trade in trades:
-                slug = trade.slug
+                cond_id = trade.condition_id
+                if not cond_id:
+                    continue
 
-                # If we don't have a cycle for this market yet, create one
-                if slug and slug not in STATE.cycles:
-                    STATE.current_cycle_id += 1
-                    cycle = Cycle(
-                        cycle_id=STATE.current_cycle_id,
-                        start_time=trade.timestamp,
-                        slug=slug,
+                if cond_id not in STATE.windows:
+                    STATE.current_window_id += 1
+                    window_start = extract_window_start(trade.slug) or trade.timestamp
+                    window = Window(
+                        window_id=STATE.current_window_id,
+                        condition_id=cond_id,
+                        slug=trade.slug,
+                        asset=trade.asset,
+                        window_start=window_start,
+                        first_trade_time=trade.timestamp,
                     )
-                    STATE.cycles[slug] = cycle
-                    log_cycle_start(cycle)
+                    STATE.windows[cond_id] = window
+                    log_window_start(window)
 
-                if slug and slug in STATE.cycles:
-                    cycle = STATE.cycles[slug]
-                    cycle.bot_trades.append(trade)
-
-                    decision_info = analyze_decision(trade, cycle.bot_trades, "BOT")
-                    log_trade(trade, decision_info)
-
-                STATE.last_bot_trade_time = trade.timestamp
+                window = STATE.windows[cond_id]
+                analyze_decision(trade, "BOT")
+                window.bot_trades.append(trade)
+                log_trade(trade)
 
         except Exception as e:
-            print(f"Bot monitor error: {e}")
+            log(f"Bot monitor error: {e}")
 
-        await asyncio.sleep(BOT_POLL_INTERVAL)
-
-
-# =============================================================================
-# Decision Analysis
-# =============================================================================
-
-def analyze_decision(trade: Trade, all_trades: List[Trade], source: str) -> str:
-    """Analyze whether this trade is a new decision or continuation."""
-    if len(all_trades) < 2:
-        return "NEW_DECISION"
-
-    # Find previous trade of same source and side
-    prev_trades = [t for t in all_trades[:-1] if t.side == trade.side]
-    if not prev_trades:
-        return "NEW_DECISION"
-
-    prev = prev_trades[-1]
-    gap = trade.timestamp - prev.timestamp
-    price_change = abs(trade.price - prev.price)
-    outcome_change = trade.outcome != prev.outcome
-    same_outcome = trade.outcome == prev.outcome
-
-    if outcome_change:
-        return f"SWITCH ({prev.outcome}→{trade.outcome})"
-
-    if gap <= 2 and price_change < 0.02:
-        return f"FILL (gap={gap:.1f}s, Δp=${price_change:.3f})"
-
-    if same_outcome:
-        if gap >= 6 or price_change >= 0.03:
-            reason = "TIME" if gap >= 6 else "PRICE"
-            return f"DOUBLE_DOWN/{reason} (gap={gap:.1f}s, Δp=${price_change:.3f})"
-        else:
-            return f"RAPID_DOUBLE (gap={gap:.1f}s, Δp=${price_change:.3f}) ⚠️"
-
-    return f"NEW (gap={gap:.1f}s)"
+        await asyncio.sleep(POLL_INTERVAL)
 
 
 # =============================================================================
-# Summary Generation
+# Periodic Tasks
 # =============================================================================
+
+async def periodic_status():
+    while True:
+        await asyncio.sleep(STATUS_INTERVAL)
+        runtime = time.time() - STATE.start_time
+        runtime_str = f"{int(runtime//3600)}h {int((runtime%3600)//60)}m"
+
+        status = (
+            f"\n[STATUS {format_ts(time.time())}] "
+            f"Runtime: {runtime_str} | "
+            f"Windows: {len(STATE.windows)} | "
+            f"REF: {STATE.total_ref_trades} trades/{STATE.total_ref_decisions} decisions | "
+            f"BOT: {STATE.total_bot_trades} trades/{STATE.total_bot_decisions} decisions"
+        )
+        if STATE.total_ref_decisions > 0:
+            ratio = STATE.total_bot_decisions / STATE.total_ref_decisions
+            status += f" | Ratio: {ratio:.2f}x"
+        log(status)
+
+
+async def periodic_summary():
+    while True:
+        await asyncio.sleep(SUMMARY_INTERVAL)
+        save_summary()
+
 
 def save_summary():
-    """Save JSON summary of all cycles."""
     summary = {
         "generated_at": datetime.now().isoformat(),
-        "reference_wallet": REFERENCE_WALLET,
-        "bot_server": BOT_SERVER,
-        "total_cycles": len(STATE.cycles),
-        "cycles": [],
+        "runtime_seconds": time.time() - STATE.start_time,
+        "totals": {
+            "windows": len(STATE.windows),
+            "ref_trades": STATE.total_ref_trades,
+            "bot_trades": STATE.total_bot_trades,
+            "ref_decisions": STATE.total_ref_decisions,
+            "bot_decisions": STATE.total_bot_decisions,
+            "trade_ratio": STATE.total_bot_trades / max(STATE.total_ref_trades, 1),
+            "decision_ratio": STATE.total_bot_decisions / max(STATE.total_ref_decisions, 1),
+        },
+        "windows": [],
     }
 
-    for slug, cycle in STATE.cycles.items():
-        ref_decisions = count_decisions(cycle.reference_trades)
-        bot_decisions = count_decisions(cycle.bot_trades)
+    for cond_id, window in STATE.windows.items():
+        ref_buys = [t for t in window.reference_trades if t.side == "BUY"]
+        bot_buys = [t for t in window.bot_trades if t.side == "BUY"]
+        ref_decisions = count_decisions(ref_buys)
+        bot_decisions = count_decisions(bot_buys)
+        bot_rapid = sum(1 for t in bot_buys if t.decision_type == "RAPID_DBL")
 
-        cycle_summary = {
-            "cycle_id": cycle.cycle_id,
-            "slug": slug,
-            "start_time": cycle.start_time,
-            "end_time": cycle.end_time or time.time(),
-            "reference_trades": len(cycle.reference_trades),
-            "bot_trades": len(cycle.bot_trades),
-            "reference_decisions": ref_decisions,
+        summary["windows"].append({
+            "window_id": window.window_id,
+            "condition_id": cond_id,
+            "slug": window.slug,
+            "asset": window.asset,
+            "ref_trades": len(ref_buys),
+            "bot_trades": len(bot_buys),
+            "ref_decisions": ref_decisions,
             "bot_decisions": bot_decisions,
-            "trade_ratio": len(cycle.bot_trades) / max(len(cycle.reference_trades), 1),
+            "trade_ratio": len(bot_buys) / max(len(ref_buys), 1),
             "decision_ratio": bot_decisions / max(ref_decisions, 1),
-        }
-        summary["cycles"].append(cycle_summary)
-
-    # Overall stats
-    total_ref_trades = sum(len(c.reference_trades) for c in STATE.cycles.values())
-    total_bot_trades = sum(len(c.bot_trades) for c in STATE.cycles.values())
-    total_ref_decisions = sum(count_decisions(c.reference_trades) for c in STATE.cycles.values())
-    total_bot_decisions = sum(count_decisions(c.bot_trades) for c in STATE.cycles.values())
-
-    summary["totals"] = {
-        "reference_trades": total_ref_trades,
-        "bot_trades": total_bot_trades,
-        "reference_decisions": total_ref_decisions,
-        "bot_decisions": total_bot_decisions,
-        "overall_trade_ratio": total_bot_trades / max(total_ref_trades, 1),
-        "overall_decision_ratio": total_bot_decisions / max(total_ref_decisions, 1),
-    }
+            "bot_rapid_doubles": bot_rapid,
+        })
 
     if STATE.summary_file:
         with open(STATE.summary_file, "w") as f:
             json.dump(summary, f, indent=2)
-        print(f"\nSummary saved to {STATE.summary_file}")
 
 
 # =============================================================================
 # Main
 # =============================================================================
 
-async def periodic_summary():
-    """Periodically save summary and print status."""
-    while True:
-        await asyncio.sleep(300)  # Every 5 minutes
-        save_summary()
-
-        # Print quick status
-        total_ref = sum(len(c.reference_trades) for c in STATE.cycles.values())
-        total_bot = sum(len(c.bot_trades) for c in STATE.cycles.values())
-        print(f"\n[STATUS] Cycles: {len(STATE.cycles)}, Ref trades: {total_ref}, Bot trades: {total_bot}")
-
-
 async def main():
-    """Main entry point."""
-    global REFERENCE_WALLET, BOT_SERVER
-
-    parser = argparse.ArgumentParser(description="Compare reference and bot trades")
-    parser.add_argument("--reference-wallet", required=True, help="Reference wallet address")
-    parser.add_argument("--bot-server", default="http://localhost:8000", help="Bot server URL")
-    args = parser.parse_args()
-
-    REFERENCE_WALLET = args.reference_wallet
-    BOT_SERVER = args.bot_server
-
-    print("=" * 60)
-    print("TRADE COMPARISON LOGGER")
-    print("=" * 60)
-    print(f"Reference: {REFERENCE_WALLET[:10]}...{REFERENCE_WALLET[-6:]}")
-    print(f"Bot: {BOT_SERVER}")
-    print(f"Press Ctrl+C to stop and save summary")
-    print("=" * 60)
-
     init_log_files()
 
     async with aiohttp.ClientSession() as session:
@@ -566,6 +670,7 @@ async def main():
             await asyncio.gather(
                 monitor_reference(session),
                 monitor_bot(session),
+                periodic_status(),
                 periodic_summary(),
             )
         except asyncio.CancelledError:
@@ -573,15 +678,14 @@ async def main():
         except KeyboardInterrupt:
             pass
         finally:
-            # Final summary
-            log_line("\n" + "=" * 100)
-            log_line("SESSION ENDED")
-            log_line("=" * 100)
-
-            for cycle in STATE.cycles.values():
-                log_cycle_summary(cycle)
-
+            log("\n" + "=" * 120)
+            log("SESSION ENDED")
+            log("=" * 120)
+            for window in STATE.windows.values():
+                log_window_summary(window)
             save_summary()
+            log(f"\nFinal summary: {STATE.summary_file}")
+            log(f"All trades: {STATE.trades_jsonl}")
 
 
 if __name__ == "__main__":

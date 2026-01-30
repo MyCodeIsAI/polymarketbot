@@ -110,3 +110,18 @@ data/analyzed_accounts_TEST.json
 data/analyzed_accounts_slim.json
 data/extraction_checkpoint.json
 data/test_scan_results.json
+
+# Analysis scripts with credentials
+arbitrage_analysis/compare_trades.py
+arbitrage_analysis/comparison_results.json
+
+# Large trade data files (generated, not for version control)
+arbitrage_analysis/reference_trades_*.json
+arbitrage_analysis/data/*_raw_trades.json
+arbitrage_analysis/data/*_full_history.json
+arbitrage_analysis/data/*_analysis.json
+arbitrage_analysis/data/*_market_analysis.json
+arbitrage_analysis/data/*_pnl_results.json
+
+# Bot runtime data (cleared on each session)
+arbitrage_bot/simulation_trades.jsonl
