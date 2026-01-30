@@ -91,6 +91,24 @@ The nuance we were missing: CUT_LOSS is **context-dependent**:
 
 The simple "$0.30 = cut losses" rule was missing the market confidence context.
 
+### Additional Fix: REBALANCE Disabled (2026-01-30 19:35 UTC)
+
+After fixing CUT_LOSS, live monitoring showed bot still over-selling via REBALANCE.
+
+**Issue**: Bot had 0% hedge ratio (all Up positions) and REBALANCE was selling Up to "improve ratio".
+
+**Historical evidence** (from check_rebalance_behavior.py):
+- Only 5.3% of sells looked like rebalancing
+- "Reference doesn't actively rebalance by selling"
+- "They likely just buy the other side to balance"
+
+**Fix**:
+```python
+REBALANCE_THRESHOLD: float = 0.00  # DISABLED - Reference buys other side, not sells
+```
+
+Reference rebalances by BUYING the underweight side, not SELLING the overweight side.
+
 ---
 
 ## ⚠️ CRITICAL CORRECTIONS (2026-01-30 17:00 UTC)
