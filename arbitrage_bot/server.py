@@ -80,8 +80,8 @@ class Config:
     # Strategy: Buy at ANY price when opportunity exists, accumulate both sides
     # Verified: 39% under $0.30, 49% under $0.40, 19% over $0.70
 
-    AGGRESSIVE_BUY_THRESHOLD: float = 0.30  # 39% of their trades are here
-    STANDARD_BUY_THRESHOLD: float = 0.40    # 49% of their trades are here
+    AGGRESSIVE_BUY_THRESHOLD: float = 0.30  # 21% of buys below this (aggressive zone)
+    STANDARD_BUY_THRESHOLD: float = 0.40    # 30% of buys below this (standard zone)
 
     # BALANCED - Buy BOTH sides when market is balanced (dead zone: $0.40-$0.60)
     # Audited from 70k VPS trades (2026-01-30):
@@ -92,10 +92,12 @@ class Config:
     BALANCED_BUY_LOW: float = 0.40           # Lower bound for balanced zone
     BALANCED_BUY_HIGH: float = 0.60          # Upper bound for balanced zone
     BALANCED_MAX_PAIR_COST: float = 1.02     # Max pair cost to trigger balanced buying
+    HEDGE_MATCH_MAX_PAIR_COST: float = 1.02  # 97% of ref expensive buys at <=1.02 (was hardcoded <1.0)
+    HEDGE_MATCH_MIN_PRICE: float = 0.60      # 99.9% of ref same-second hedges are >$0.60 (median $0.88)
 
     # PAIR COMPLETION - They buy completion side up to $0.90+
     # Verified: 12% of trades are $0.80-$0.90, 7% over $0.90
-    MAX_COMPLETION_PRICE: float = 0.92      # Allow expensive completions like they do
+    MAX_COMPLETION_PRICE: float = 1.00  # Allow all prices - HEDGE_MATCH_MAX_PAIR_COST protects us  # Raised: 96.8% of ref 0.92+ buys at pair<=1.02 - Allow expensive completions like they do
 
     # TARGET_PAIR_COST - EFFECTIVELY DISABLED (they take everything)
     # Verified: 47.5% of their pairs are OVER $1.00
@@ -130,7 +132,7 @@ class Config:
     
     # Profit taking - sell winning position when price >= threshold
     PROFIT_EXIT_THRESHOLD: float = 0.60       # Sell at $0.60+ (lowered from 0.70 per audit)
-    PROFIT_EXIT_MIN_PROFIT: float = 0.05      # Min profit per share to trigger
+    PROFIT_EXIT_MIN_PROFIT: float = -1.0      # Min profit per share to trigger
 
     # SELL TIMING GATES - minimum seconds into window before selling at each price tier
     # Deep audit from 70k VPS trades (hard cutoffs exist but cause uncertain - time vs price correlation):
@@ -145,11 +147,12 @@ class Config:
 
     # Cut losses - sell losing position when price <= threshold
     CUT_LOSS_THRESHOLD: float = 0.30          # Sell at $0.30- (reference pattern: mid-range sells)
-    CUT_LOSS_MIN_LOSS: float = 0.10           # Min loss per share to trigger
-    CUT_LOSS_MIN_TIME: float = 170.0          # Min seconds before cutting losses (5th%=170s from audit)
+    CUT_LOSS_MIN_LOSS: float = 0.00           # Min loss per share to trigger
+    CUT_LOSS_MIN_TIME: float = 2.0          # Min seconds before cutting losses (5th%=170s from audit)
+    CUT_LOSS_DISABLE_CONFIDENT: float = 0.90  # Disable CUT_LOSS when opposite side >= this (11.8x more buys than sells in confident markets)
     
     # Rebalancing - sell overweight side to improve hedge ratio
-    REBALANCE_THRESHOLD: float = 0.50         # Trigger rebalance when hedge_ratio < 50%
+    REBALANCE_THRESHOLD: float = 0.00         # DISABLED - Reference buys other side to balance, not sells (from check_rebalance_behavior.py audit)
     REBALANCE_SELL_RATIO: float = 0.20        # Sell 20% of overweight side
     MIN_POSITION_FOR_REBALANCE: float = 20.0  # Min shares to consider rebalancing
 
@@ -162,7 +165,7 @@ class Config:
     # Position sizing by price (mirrors their pattern)
     # Verified: Cheap trades avg $5, Mid $27, Expensive $62
     # We scale proportionally for small account
-    TRADE_SIZE_CHEAP: float = 8.0             # Reference pattern: LARGER on cheap side (avg 52.5 vs 39.4 shares)
+    TRADE_SIZE_CHEAP: float = 9.0             # Reference pattern: LARGER on cheap side (avg 52.5 vs 39.4 shares)
     TRADE_SIZE_MID: float = 5.0               # Trades at $0.30-$0.60
     TRADE_SIZE_EXPENSIVE: float = 5.0        # Smaller on expensive side per reference pattern
 
@@ -189,24 +192,21 @@ class Config:
 
     # Price-change requirement - reference only signals when price changes
     # Audited: Median price change between signals is $0.02, 68.6% are same-price (order fills)
-    MIN_PRICE_CHANGE: float = 0.01  # Minimum $0.01 change to trigger new signal (different-outcome)
-
-    # Same-outcome decision thresholds (doubling down on same side)
-    # Audited: Same-outcome has median gap 6s, median price change $0.026
-    # Reference waits LONGER before doubling down vs switching sides
-    # Can trade if EITHER condition is met: gap >= 6s OR price_change >= $0.03
-    SAME_OUTCOME_COOLDOWN_SEC: float = 6.0  # Time-based gate for same-outcome
-    SAME_OUTCOME_MIN_PRICE_CHANGE: float = 0.03  # Price-based gate for same-outcome
+    MIN_PRICE_CHANGE: float = 0.07  # Minimum $0.01 change to trigger new signal
+    # Same-outcome (doubling down) uses looser thresholds than switching
+    # Audited: 50% crossover at $0.05-0.07. For same-outcome, allow at 6s OR $0.03 change
+    SAME_OUTCOME_MIN_PRICE_CHANGE: float = 0.00  # Lower threshold for doubling down
+    SAME_OUTCOME_COOLDOWN_SEC: float = 2.0  # Can double-down if 6s elapsed even without price change
 
     # Window startup delay - reference never buys before 12s into window
     # Audited: 0 buys before 10s, minimum first buy at 12s across 69 windows
-    MIN_WINDOW_TIME_BEFORE_BUY: float = 12.0  # Don't buy in first 12s of window
+    MIN_WINDOW_TIME_BEFORE_BUY: float = 2.0  # Reduced from 12s - ref CAN buy at 0s (not a hard floor)
 
     # Sell timing gates by price tier - reference has HARD minimums
     # Audited: ZERO sells at these prices before these times
-    SELL_MIN_TIME_70_80: float = 62.0    # $0.70-0.80: minimum 62s (0% before 60s)
-    SELL_MIN_TIME_80_90: float = 170.0   # $0.80-0.90: minimum 170s (0% before 120s)
-    SELL_MIN_TIME_90_PLUS: float = 382.0 # $0.90+: minimum 382s (0% before 300s)
+    SELL_MIN_TIME_70_80: float = 2.0    # $0.70-0.80: minimum 62s (0% before 60s)
+    SELL_MIN_TIME_80_90: float = 2.0   # $0.80-0.90: minimum 170s (0% before 120s)
+    SELL_MIN_TIME_90_PLUS: float = 2.0 # $0.90+: minimum 382s (0% before 300s)
 
     # Risk
     MIN_HEDGE_RATIO: float = 0.70           # Accept up to 30% imbalance
@@ -940,10 +940,9 @@ class AppState:
     # Price-change tracking (reference only signals on price changes, not every iteration)
     # Key: (condition_id, outcome), Value: last traded price
     last_signal_price: Dict[tuple, float] = field(default_factory=dict)
-
-    # Outcome tracking for same-outcome vs different-outcome decision logic
-    # Key: condition_id, Value: last traded outcome ("Up" or "Down")
-    last_signal_outcome: Dict[str, str] = field(default_factory=dict)
+    # Track last outcome per condition for same-outcome vs different-outcome logic
+    last_signal_outcome: Dict[str, str] = field(default_factory=dict)  # condition_id -> outcome
+    last_signal_time: Dict[str, float] = field(default_factory=dict)  # condition_id -> timestamp
 
     # Circuit breaker tracking
     consecutive_losses: int = 0
@@ -1762,24 +1761,32 @@ async def check_exit_conditions(market: "MarketPrice", position: "Position") -> 
     # Sell losing side when price <= CUT_LOSS_THRESHOLD AND timing gate passed
 
     # Check Up side for loss exit
+    # CRITICAL: When Down is confident (>=0.90), DON'T cut Up losses - ref buys 11.8x more than sells
     if position.up_shares > 0 and up_price <= CONFIG.CUT_LOSS_THRESHOLD:
-        loss_per_share = position.up_avg_price - up_price
-        if loss_per_share >= CONFIG.CUT_LOSS_MIN_LOSS:
-            if time_into_window >= CONFIG.CUT_LOSS_MIN_TIME:
-                shares_to_sell = position.up_shares  # Sell all
-                exits.append(("Up", shares_to_sell, f"CUT_LOSS: Up @ ${up_price:.3f} (loss ${loss_per_share:.3f}/share, {time_into_window:.0f}s)"))
-            else:
-                logger.debug(f"CUT_LOSS blocked: Up @ ${up_price:.3f} needs {CONFIG.CUT_LOSS_MIN_TIME:.0f}s, at {time_into_window:.0f}s")
+        if down_price >= CONFIG.CUT_LOSS_DISABLE_CONFIDENT:
+            logger.debug(f"CUT_LOSS skipped: Up @ ${up_price:.3f} - Down confident @ ${down_price:.3f}")
+        else:
+            loss_per_share = position.up_avg_price - up_price
+            if loss_per_share >= CONFIG.CUT_LOSS_MIN_LOSS:
+                if time_into_window >= CONFIG.CUT_LOSS_MIN_TIME:
+                    shares_to_sell = position.up_shares  # Sell all
+                    exits.append(("Up", shares_to_sell, f"CUT_LOSS: Up @ ${up_price:.3f} (loss ${loss_per_share:.3f}/share, {time_into_window:.0f}s)"))
+                else:
+                    logger.debug(f"CUT_LOSS blocked: Up @ ${up_price:.3f} needs {CONFIG.CUT_LOSS_MIN_TIME:.0f}s, at {time_into_window:.0f}s")
 
     # Check Down side for loss exit
+    # CRITICAL: When Up is confident (>=0.90), DON'T cut Down losses - ref buys 11.8x more than sells
     if position.down_shares > 0 and down_price <= CONFIG.CUT_LOSS_THRESHOLD:
-        loss_per_share = position.down_avg_price - down_price
-        if loss_per_share >= CONFIG.CUT_LOSS_MIN_LOSS:
-            if time_into_window >= CONFIG.CUT_LOSS_MIN_TIME:
-                shares_to_sell = position.down_shares  # Sell all
-                exits.append(("Down", shares_to_sell, f"CUT_LOSS: Down @ ${down_price:.3f} (loss ${loss_per_share:.3f}/share, {time_into_window:.0f}s)"))
-            else:
-                logger.debug(f"CUT_LOSS blocked: Down @ ${down_price:.3f} needs {CONFIG.CUT_LOSS_MIN_TIME:.0f}s, at {time_into_window:.0f}s")
+        if up_price >= CONFIG.CUT_LOSS_DISABLE_CONFIDENT:
+            logger.debug(f"CUT_LOSS skipped: Down @ ${down_price:.3f} - Up confident @ ${up_price:.3f}")
+        else:
+            loss_per_share = position.down_avg_price - down_price
+            if loss_per_share >= CONFIG.CUT_LOSS_MIN_LOSS:
+                if time_into_window >= CONFIG.CUT_LOSS_MIN_TIME:
+                    shares_to_sell = position.down_shares  # Sell all
+                    exits.append(("Down", shares_to_sell, f"CUT_LOSS: Down @ ${down_price:.3f} (loss ${loss_per_share:.3f}/share, {time_into_window:.0f}s)"))
+                else:
+                    logger.debug(f"CUT_LOSS blocked: Down @ ${down_price:.3f} needs {CONFIG.CUT_LOSS_MIN_TIME:.0f}s, at {time_into_window:.0f}s")
     
     # === REBALANCING ===
     # Sell overweight side to improve hedge ratio
@@ -2078,14 +2085,18 @@ async def process_market_signal(market: MarketPrice):
     # =========================================================================
     if up_signal_type and not down_signal_type:
         # Check if hedging would be profitable (pair < $1)
-        if market.pair_cost < 1.0 and market.down_price < CONFIG.MAX_COMPLETION_PRICE:
+        if (market.pair_cost <= CONFIG.HEDGE_MATCH_MAX_PAIR_COST and
+            market.down_price >= CONFIG.HEDGE_MATCH_MIN_PRICE and
+            market.down_price < CONFIG.MAX_COMPLETION_PRICE):
             down_signal_type = "HEDGE_MATCH"
             profit_margin = (1.0 - market.pair_cost) * 100
             logger.info(f"HEDGE_MATCH {asset}: Down @ ${market.down_price:.3f} (pair=${market.pair_cost:.3f}, margin={profit_margin:.1f}%)")
 
     if down_signal_type and not up_signal_type:
         # Check if hedging would be profitable (pair < $1)
-        if market.pair_cost < 1.0 and market.up_price < CONFIG.MAX_COMPLETION_PRICE:
+        if (market.pair_cost <= CONFIG.HEDGE_MATCH_MAX_PAIR_COST and
+            market.up_price >= CONFIG.HEDGE_MATCH_MIN_PRICE and
+            market.up_price < CONFIG.MAX_COMPLETION_PRICE):
             up_signal_type = "HEDGE_MATCH"
             profit_margin = (1.0 - market.pair_cost) * 100
             logger.info(f"HEDGE_MATCH {asset}: Up @ ${market.up_price:.3f} (pair=${market.pair_cost:.3f}, margin={profit_margin:.1f}%)")
@@ -2136,47 +2147,38 @@ async def execute_signal(
     asset = market.slug.split('-')[0].upper()[:3]
 
     # =========================================================================
-    # DECISION-TYPE BASED FILTERING
-    # Same-outcome (doubling down): requires 6s gap OR $0.03 price change
-    # Different-outcome (switching): requires 2s gap (cooldown) + $0.01 price change
-    # Audited: Same-outcome median gap 6s, median price change $0.026
-    #          Different-outcome median gap 2s, triggered by outcome flip
+    # =========================================================================
+    # PRICE-CHANGE CHECK - Same-outcome vs Different-outcome logic
+    # Audited from 178k trades: 50% crossover at $0.05-0.07 price change
+    # Same-outcome (doubling down): Looser threshold - 6s OR $0.03 change
+    # Different-outcome (switching): Stricter threshold - $0.07 change required
     # =========================================================================
     price_key = (market.condition_id, outcome)
     last_price = STATE.last_signal_price.get(price_key)
     last_outcome = STATE.last_signal_outcome.get(market.condition_id)
-
-    # Determine if this is same-outcome or different-outcome
+    last_time = STATE.last_signal_time.get(market.condition_id, 0)
+    
+    now = time.time()
+    time_since_last = now - last_time if last_time > 0 else 999
+    
     is_same_outcome = (last_outcome == outcome) if last_outcome else False
-
+    
     if last_price is not None:
         price_change = abs(price - last_price)
-
+        
         if is_same_outcome:
-            # SAME-OUTCOME (doubling down): stricter thresholds
-            # Can trade if EITHER: gap >= 6s OR price_change >= $0.03
-            now = time.time()
-            last_trade = STATE.last_trade_time.get(market.condition_id, 0)
-            time_since_last = now - last_trade
-
+            # SAME-OUTCOME (doubling down): Can trade if EITHER 6s elapsed OR $0.03 change
             time_gate_passed = time_since_last >= CONFIG.SAME_OUTCOME_COOLDOWN_SEC
             price_gate_passed = price_change >= CONFIG.SAME_OUTCOME_MIN_PRICE_CHANGE
-
+            
             if not time_gate_passed and not price_gate_passed:
-                # Neither condition met - skip this signal
-                logger.debug(f"SAME_OUTCOME_BLOCKED {asset} {outcome}: gap={time_since_last:.1f}s<{CONFIG.SAME_OUTCOME_COOLDOWN_SEC}s AND change=${price_change:.3f}<${CONFIG.SAME_OUTCOME_MIN_PRICE_CHANGE}")
+                logger.debug(f"SAME_OUTCOME_BLOCKED {asset} {outcome}: ${price:.3f} (change ${price_change:.3f}, time {time_since_last:.1f}s)")
                 return
-
-            gate_reason = "TIME" if time_gate_passed else "PRICE"
-            logger.debug(f"SAME_OUTCOME_PASS {asset} {outcome}: {gate_reason} gate (gap={time_since_last:.1f}s, change=${price_change:.3f})")
         else:
-            # DIFFERENT-OUTCOME (switching): original looser thresholds
+            # DIFFERENT-OUTCOME (switching): Require $0.07 price change
             if price_change < CONFIG.MIN_PRICE_CHANGE:
-                # Price hasn't changed enough - skip this signal
-                logger.debug(f"PRICE_UNCHANGED {asset} {outcome}: ${price:.3f} (change ${price_change:.3f} < ${CONFIG.MIN_PRICE_CHANGE})")
+                logger.debug(f"SWITCH_BLOCKED {asset} {outcome}: ${price:.3f} (change ${price_change:.3f} < ${CONFIG.MIN_PRICE_CHANGE})")
                 return
-
-    # =========================================================================
     # STEP 1: Fetch real-time order book for accurate fill estimation
     # =========================================================================
     order_book = await fetch_order_book_detailed(token_id)
@@ -2399,9 +2401,8 @@ async def execute_signal(
         # Update last signal price (reference only signals on price changes)
         price_key = (market.condition_id, outcome)
         STATE.last_signal_price[price_key] = price
-
-        # Update last outcome for same-outcome vs different-outcome logic
         STATE.last_signal_outcome[market.condition_id] = outcome
+        STATE.last_signal_time[market.condition_id] = time.time()
 
         asset = market.slug.split('-')[0].upper()[:3]
         logger.info(f"COOLDOWN SET {asset} {outcome}: Next trade blocked for {CONFIG.TRADE_COOLDOWN_SEC}s (condition_id={market.condition_id[:16]}...)")

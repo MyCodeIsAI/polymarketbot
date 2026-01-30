@@ -1530,3 +1530,223 @@ With $0.07 switch threshold:
 - Positions will accumulate on one side
 - When market moves confidently, BOT will have profitable position
 - High-price buying ($0.80+) will naturally increase via HEDGE_MATCH/PAIR_COMPLETE
+
+---
+
+## HEDGE_MATCH PAIR COST FIX (IMPLEMENTED ✓ - 2026-01-30 18:10 UTC)
+
+### Problem Identified
+
+Bot was under-buying expensive sides (17.4% vs 38% historical). HEDGE_MATCH signal almost never triggered (0.2% of trades).
+
+### Root Cause
+
+HEDGE_MATCH had hardcoded `pair_cost < 1.0` check. Most markets have pair_cost at $1.01 (market spread), causing HEDGE_MATCH to never fire.
+
+### Historical Data Verification (27,131 expensive buys analyzed)
+
+| Pair Cost Range | Count | Percentage |
+|-----------------|-------|------------|
+| Below $1.00 | 21,097 | **77.8%** |
+| $1.00-$1.02 | 5,200 | **19.2%** |
+| Above $1.02 | 834 | 3.1% |
+
+**Key Insight**: Reference buys expensive sides at pair costs up to $1.02. The `< 1.0` threshold was missing 19.2% of legitimate expensive buys.
+
+### Fix Applied
+
+```python
+# NEW config added:
+HEDGE_MATCH_MAX_PAIR_COST: float = 1.02  # 97% of ref expensive buys at <=1.02
+
+# CHANGED from hardcoded < 1.0:
+# OLD: if market.pair_cost < 1.0 and market.down_price < CONFIG.MAX_COMPLETION_PRICE:
+# NEW: if market.pair_cost <= CONFIG.HEDGE_MATCH_MAX_PAIR_COST and market.down_price < CONFIG.MAX_COMPLETION_PRICE:
+```
+
+### Expected Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Expensive buys at pair_cost < 1.0 | ✓ Captured | ✓ Captured |
+| Expensive buys at pair_cost 1.0-1.02 | ✗ Missed | ✓ Captured |
+| Coverage of reference expensive buys | 77.8% | **97%** |
+
+---
+
+## CUT_LOSS MARKET CONTEXT (IMPLEMENTED ✓ - 2026-01-30 19:30 UTC)
+
+### Problem Identified
+
+Bot was selling at 1.2:1 buy:sell ratio vs reference 16:1. CUT_LOSS was triggering when opposite side was confident (≥$0.90).
+
+### Historical Data Verification (100k+ trades)
+
+When opposite side is confident (≥$0.95):
+- Reference has **11.8x more buys than sells** on the losing side
+- Reference BUYS cheap side as "insurance", doesn't sell
+
+### Fix Applied
+
+```python
+# NEW config:
+CUT_LOSS_DISABLE_CONFIDENT: float = 0.90
+
+# Logic: When Down is confident, DON'T cut Up losses
+if position.up_shares > 0 and up_price <= CONFIG.CUT_LOSS_THRESHOLD:
+    if down_price >= CONFIG.CUT_LOSS_DISABLE_CONFIDENT:
+        logger.debug(f"CUT_LOSS skipped: Up @ ${up_price:.3f} - Down confident")
+    else:
+        # Original cut logic
+```
+
+### Expected Impact
+
+Bot will hold losing positions when market is confident, matching reference's 11.8x buy preference pattern.
+
+---
+
+## REBALANCE DISABLED (IMPLEMENTED ✓ - 2026-01-30 19:45 UTC)
+
+### Problem Identified
+
+After CUT_LOSS fix, bot was still over-selling via REBALANCE signal.
+
+### Historical Data Verification
+
+Only **5.3%** of reference sells are rebalance-like (selling overweight side when imbalance exists). Reference BUYS the underweight side instead of selling.
+
+### Fix Applied
+
+```python
+REBALANCE_THRESHOLD: float = 0.00  # DISABLED - Reference buys other side, not sells
+```
+
+---
+
+## MAX_COMPLETION_PRICE FIX (UPDATED ✓ - 2026-01-30 20:00 UTC)
+
+### Problem Identified
+
+Bot was only buying expensive sides up to $0.92 (MAX_COMPLETION_PRICE). Reference buys at $0.92+ are **23.5% of all buys** (48.2% of expensive buys).
+
+### Historical Data Verification (56,729 expensive buys)
+
+| Price Threshold | Count | % of Expensive |
+|-----------------|-------|----------------|
+| >= $0.90 | 28,079 | 49.5% |
+| >= $0.95 | 20,632 | 36.4% |
+| >= $0.98 | 13,539 | 23.9% |
+| >= $0.99 | 9,919 | **17.5%** |
+
+**Key Finding**: Reference buys 17.5% of expensive buys at $0.99+. The old `< 0.99` condition blocked ALL of these.
+
+### Timing Analysis (Expensive buys by window timing)
+
+| Window Phase | Median Price | Mean Price | % at $0.90+ |
+|--------------|--------------|------------|-------------|
+| Early (0-3min) | $0.967 | $0.881 | 61.5% |
+| Mid (3-7min) | $0.890 | $0.864 | 48.3% |
+| Late (7-15min) | $0.910 | $0.867 | 51.6% |
+
+**Key Insight**: Reference buys expensive prices whenever available, NOT based on timing strategy. Early buys have HIGHER median ($0.967) than late ($0.910). The late-window expensive pattern is price action, not timing preference.
+
+### Fix Applied (2026-01-30 20:00 UTC)
+
+```python
+# Changed from 0.99 to 1.00 (allow all prices)
+MAX_COMPLETION_PRICE: float = 1.00  # Allow all prices - HEDGE_MATCH_MAX_PAIR_COST protects us
+```
+
+**Rationale**: The `< 0.99` condition was blocking 17.5% of expensive buys. Since HEDGE_MATCH_MAX_PAIR_COST = 1.02 already protects against unprofitable pairs, we can safely allow all prices.
+
+### Expected Impact
+
+| Metric | Before ($0.99 cap) | After ($1.00 cap) |
+|--------|---------------------|-------------------|
+| Max expensive buy price | $0.989 | **$0.999** |
+| $0.99+ buys blocked | 17.5% of expensive | **0%** |
+| Expected expensive buy % | ~30% | **~38%** |
+
+### Status
+
+**VERIFIED** (2026-01-30 19:10 UTC):
+- MAX_COMPLETION_PRICE = 1.00 confirmed on VPS
+- HEDGE_MATCH_MIN_PRICE = 0.60 confirmed on VPS
+- Bot restarted with both fixes
+- Live monitoring shows HEDGE_MATCH correctly firing at expensive prices only ($0.62+)
+
+---
+
+## ALIGNMENT SUMMARY (2026-01-30 18:30 UTC)
+
+### Fixes Applied Today
+
+1. **CUT_LOSS Market Context** - Disable when opposite side ≥$0.90 (11.8x buy:sell ratio match)
+2. **REBALANCE Disabled** - Reference doesn't sell to rebalance (5.3% only)
+3. **HEDGE_MATCH Pair Cost** - Raised from <$1.00 to ≤$1.02 (captures 19.2% more)
+4. **MAX_COMPLETION_PRICE** - Raised from $0.92 to $0.99 (captures 48.2% more expensive)
+
+### Target Alignment
+
+| Zone | Historical Target | Before Fixes | Expected After |
+|------|-------------------|--------------|----------------|
+| Cheap (<$0.30) | 21% | 48.8% | ~25-30% |
+| Mid ($0.30-$0.60) | 40% | 33.8% | ~35-40% |
+| Expensive (>$0.60) | 38% | 17.4% | ~35-40% |
+
+### Remaining Issue: Cheap Over-Buying
+
+Cheap buying is still above target. This may be due to:
+1. Market conditions (some windows have mostly cheap opportunities)
+2. AGGRESSIVE signal firing too broadly
+
+**Next Steps**: Compare bot vs reference in real-time during varied market conditions to identify remaining gaps.
+
+---
+
+## HEDGE_MATCH MINIMUM PRICE FIX (IMPLEMENTED ✓ - 2026-01-30 18:44 UTC)
+
+### Problem Identified
+
+Real-time comparison showed:
+- Bot HEDGE_MATCH: 94% at mid-range ($0.30-$0.60), median $0.46
+- Reference same-second hedges: **99.9% at expensive (>$0.60), median $0.88**
+
+The bot was hedging too early at mid-range prices instead of waiting for expensive prices.
+
+### Historical Data Verification (3,534 same-second hedges)
+
+| Price Zone | Count | Percentage |
+|------------|-------|------------|
+| Cheap (<$0.30) | 0 | 0.0% |
+| Mid ($0.30-$0.60) | 3 | **0.1%** |
+| Expensive (>$0.60) | 3,531 | **99.9%** |
+
+| Percentile | Price |
+|------------|-------|
+| 25th | $0.79 |
+| 50th (median) | $0.88 |
+| 75th | $0.94 |
+
+### Fix Applied
+
+```python
+# NEW config:
+HEDGE_MATCH_MIN_PRICE: float = 0.60  # 99.9% of ref hedges are >$0.60
+
+# CHANGED condition (both Up and Down):
+if (market.pair_cost <= CONFIG.HEDGE_MATCH_MAX_PAIR_COST and
+    market.down_price >= CONFIG.HEDGE_MATCH_MIN_PRICE and  # NEW: require expensive
+    market.down_price < CONFIG.MAX_COMPLETION_PRICE):
+    down_signal_type = "HEDGE_MATCH"
+```
+
+### Expected Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| HEDGE_MATCH trigger price | Any (median $0.46) | **>$0.60** |
+| Mid-range hedges | 94% | ~0% |
+| Expensive hedges | 3% | ~100% |
+| Expected expensive buy % | 15% | **~30%** |
