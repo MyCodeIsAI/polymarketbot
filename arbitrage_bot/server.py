@@ -2025,7 +2025,8 @@ async def process_market_signal(market: MarketPrice):
     # ----- CHECK UP SIDE -----
     if market.up_price < aggressive_threshold:
         # AGGRESSIVE: Always buy very cheap sides
-        if projected_pair_if_buy_up < CONFIG.MAX_PAIR_COST:
+        # Use MARKET pair cost, not projected - we buy cheap hedges regardless of position cost basis
+        if market.pair_cost <= CONFIG.MAX_PAIR_COST:
             up_signal_type = "AGGRESSIVE"
     elif market.up_price < standard_threshold:
         # STANDARD: Buy moderately cheap if pair cost is good
@@ -2042,7 +2043,8 @@ async def process_market_signal(market: MarketPrice):
     # ----- CHECK DOWN SIDE -----
     if market.down_price < aggressive_threshold:
         # AGGRESSIVE: Always buy very cheap sides
-        if projected_pair_if_buy_down < CONFIG.MAX_PAIR_COST:
+        # Use MARKET pair cost, not projected - we buy cheap hedges regardless of position cost basis
+        if market.pair_cost <= CONFIG.MAX_PAIR_COST:
             down_signal_type = "AGGRESSIVE"
     elif market.down_price < standard_threshold:
         # STANDARD: Buy moderately cheap if pair cost is good
