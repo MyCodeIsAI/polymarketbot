@@ -81,6 +81,11 @@ class Window:
     first_trade_time: float
     reference_trades: List[Trade] = field(default_factory=list)
     bot_trades: List[Trade] = field(default_factory=list)
+    # Signal detection: first expensive trade (≥$0.70) establishes bias
+    signal_detected: bool = False
+    signal_time: float = 0.0
+    signal_outcome: str = ""  # The direction REF signaled
+    pre_signal_trades: int = 0  # Count of REF trades before signal (not recorded)
 
 
 # =============================================================================
@@ -186,6 +191,8 @@ Bot Server: {BOT_SERVER}
 FILTERING:
   - TAKER trades only (usdcSize > 0) - excludes market maker noise
   - TRUE 15-min markets only (slug: *-updown-15m-*) - excludes hourly/4h
+  - POST-SIGNAL trades only: REF trades before first expensive (≥$0.70) are SKIPPED
+    (Bot waits for signal, so pre-signal REF trades are not comparable)
 {'='*120}
 
 LEGEND:
@@ -243,6 +250,7 @@ def log_window_start(window: Window):
     log(f"WINDOW {window.window_id}: {window.condition_id[:30]}...")
     log(f"Slug: {window.slug} | Asset: {window.asset}")
     log(f"Start: {format_full_ts(window.window_start)} | First Trade: {format_full_ts(window.first_trade_time)}")
+    log(f"(Waiting for signal - first expensive ≥$0.70)")
     log("=" * 120)
     log("")
     log(f"{'TIME':<10} {'SRC':<4} {'SIDE':<5} {'OUT':<5} {'PRICE':<8} {'SIZE':<8} {'OFFSET':<8} {'DECISION':<12} {'DETAILS'}")
@@ -281,8 +289,17 @@ def log_window_summary(window: Window):
     log("")
     log("-" * 120)
     log(f"WINDOW {window.window_id} SUMMARY: {window.slug}")
-    log(f"  Reference: {len(ref_buys)} buys, {ref_decisions} decisions")
-    log(f"  Bot:       {len(bot_buys)} buys, {bot_decisions} decisions")
+
+    # Signal info
+    if window.signal_detected:
+        signal_offset = window.signal_time - window.window_start
+        log(f"  Signal: {window.signal_outcome} @ {signal_offset:.0f}s into window")
+        log(f"  Pre-signal trades skipped: {window.pre_signal_trades}")
+    else:
+        log(f"  ⚠️ NO SIGNAL DETECTED (no expensive ≥$0.70 trade)")
+
+    log(f"  Reference (post-signal): {len(ref_buys)} buys, {ref_decisions} decisions")
+    log(f"  Bot:                     {len(bot_buys)} buys, {bot_decisions} decisions")
 
     if ref_buys:
         trade_ratio = len(bot_buys) / len(ref_buys)
@@ -462,7 +479,11 @@ async def fetch_reference_trades(session: aiohttp.ClientSession) -> List[Trade]:
 
 
 async def monitor_reference(session: aiohttp.ClientSession):
-    """Monitor reference trades by fetching from data-api."""
+    """Monitor reference trades by fetching from data-api.
+
+    IMPORTANT: Only records trades AFTER signal detection (first expensive ≥$0.70).
+    Pre-signal trades are counted but NOT recorded, since bot waits for signal.
+    """
     while True:
         try:
             trades = await fetch_reference_trades(session)
@@ -488,6 +509,22 @@ async def monitor_reference(session: aiohttp.ClientSession):
                     log_window_start(window)
 
                 window = STATE.windows[window_key]
+
+                # SIGNAL DETECTION: First expensive trade (≥$0.70) establishes bias
+                # Pre-signal trades are NOT recorded (bot waits for signal)
+                if not window.signal_detected:
+                    if trade.price >= 0.70:
+                        # THIS IS THE SIGNAL - first expensive trade
+                        window.signal_detected = True
+                        window.signal_time = trade.timestamp
+                        window.signal_outcome = trade.outcome
+                        log(f"  >>> SIGNAL DETECTED: {trade.outcome} @ ${trade.price:.2f} ({window.pre_signal_trades} pre-signal trades skipped)")
+                    else:
+                        # Pre-signal trade - count but don't record
+                        window.pre_signal_trades += 1
+                        continue  # Skip recording this trade
+
+                # Post-signal: record the trade
                 analyze_decision(trade, "REF")
                 window.reference_trades.append(trade)
                 log_trade(trade)
@@ -693,6 +730,10 @@ def save_summary():
             "condition_id": cond_id,
             "slug": window.slug,
             "asset": window.asset,
+            "signal_detected": window.signal_detected,
+            "signal_outcome": window.signal_outcome,
+            "signal_time_offset": (window.signal_time - window.window_start) if window.signal_detected else None,
+            "pre_signal_trades_skipped": window.pre_signal_trades,
             "ref_trades": len(ref_buys),
             "bot_trades": len(bot_buys),
             "ref_decisions": ref_decisions,
