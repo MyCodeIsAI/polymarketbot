@@ -33,7 +33,7 @@ import aiohttp
 # Reference trade data
 REFERENCE_WALLET = "0x93c22116e4402c9332ee6db578050e688934c072"
 DATA_API = "https://data-api.polymarket.com"
-BOT_SERVER = "http://localhost:8765"
+BOT_SERVER = "http://localhost:8001"
 LOG_DIR = Path("./comparison_logs")
 
 # Poll intervals
@@ -122,18 +122,29 @@ def extract_window_start(slug: str) -> Optional[float]:
 
 
 def is_15m_crypto(slug: str) -> bool:
-    """Check if slug is a 15-minute crypto window."""
+    """Check if slug is a TRUE 15-minute crypto window.
+
+    STRICT FILTERING: Only accepts slug pattern "*-updown-15m-*" (e.g., "btc-updown-15m-1769756400")
+    REJECTS: "up-or-down-*-et" patterns which are actually hourly markets
+    """
     slug_lower = slug.lower()
-    # Reference format: "btc-updown-15m-1769756400"
-    if "-15m-" in slug_lower:
-        return True
-    # Bot format: "bitcoin-up-or-down---january-30,-2:30am-2:45am-et"
-    # Contains crypto name and 15-minute time range (e.g., "2:30am-2:45am")
-    crypto_names = ["bitcoin", "ethereum", "solana", "xrp", "dogecoin", "cardano", "avalanche"]
-    has_crypto = any(c in slug_lower for c in crypto_names)
-    # Check for 15-min time range pattern (e.g., "2:30am-2:45am" or "2:15am-2:30am")
-    has_15m_range = bool(re.search(r'\d{1,2}:\d{2}[ap]m-\d{1,2}:\d{2}[ap]m', slug_lower))
-    return has_crypto and has_15m_range
+    # ONLY accept true 15-min format: "btc-updown-15m-1769756400"
+    # Must contain "-updown-15m-" - this is the validated 15-min market pattern
+    return "-updown-15m-" in slug_lower
+
+
+
+def get_window_key(slug: str) -> str:
+    """Extract a consistent window key from slug (asset + window timestamp)."""
+    if not slug:
+        return ""
+    # Format: btc-updown-15m-1769837400
+    parts = slug.lower().split("-")
+    if len(parts) >= 4 and "15m" in parts:
+        asset = parts[0]
+        timestamp = parts[-1]  # The window timestamp at the end
+        return f"{asset}_{timestamp}"
+    return slug
 
 
 def get_asset(slug: str) -> str:
@@ -165,12 +176,16 @@ def init_log_files():
 
     header = f"""
 {'='*120}
-TRADE COMPARISON LOGGER
+TRADE COMPARISON LOGGER (TAKER-ONLY + TRUE 15-MIN MARKETS)
 {'='*120}
 Started: {datetime.now().isoformat()}
 Reference Wallet: {REFERENCE_WALLET}
 Data API: {DATA_API}
 Bot Server: {BOT_SERVER}
+
+FILTERING:
+  - TAKER trades only (usdcSize > 0) - excludes market maker noise
+  - TRUE 15-min markets only (slug: *-updown-15m-*) - excludes hourly/4h
 {'='*120}
 
 LEGEND:
@@ -359,7 +374,12 @@ def analyze_decision(trade: Trade, source: str) -> None:
 # =============================================================================
 
 async def fetch_reference_trades(session: aiohttp.ClientSession) -> List[Trade]:
-    """Fetch trades from the Polymarket data-api for reference wallet."""
+    """Fetch TAKER trades only from the Polymarket data-api for reference wallet.
+
+    FILTERING:
+    - TAKER trades only: usdcSize > 0 (MAKER trades have usdcSize = 0)
+    - TRUE 15-min markets only: slug contains "-updown-15m-"
+    """
     try:
         url = f"{DATA_API}/activity?user={REFERENCE_WALLET}&limit=200"
         async with session.get(url, timeout=10) as resp:
@@ -380,6 +400,12 @@ async def fetch_reference_trades(session: aiohttp.ClientSession) -> List[Trade]:
             tx_hash = item.get("transactionHash", "")
             if not tx_hash or tx_hash in STATE.seen_reference_hashes:
                 continue
+
+            # CRITICAL: Filter to TAKER trades only (usdcSize > 0)
+            # MAKER trades have usdcSize = 0 (market making / rebate farming)
+            usdc_size = float(item.get("usdcSize", 0) or 0)
+            if usdc_size <= 0:
+                continue  # Skip MAKER trades (no capital deployed)
 
             # Parse timestamp - API returns ISO format or unix
             ts_raw = item.get("timestamp", 0)
@@ -410,7 +436,7 @@ async def fetch_reference_trades(session: aiohttp.ClientSession) -> List[Trade]:
 
             slug = item.get("slug", "") or item.get("eventSlug", "") or item.get("market_slug", "")
             if not is_15m_crypto(slug):
-                continue  # Only 15m crypto windows
+                continue  # Only TRUE 15-min markets (slug: *-updown-15m-*)
 
             window_start = extract_window_start(slug)
             window_offset = (ts - window_start) if window_start else 0
@@ -446,7 +472,8 @@ async def monitor_reference(session: aiohttp.ClientSession):
                 if not cond_id:
                     continue
 
-                if cond_id not in STATE.windows:
+                window_key = get_window_key(trade.slug) or cond_id
+                if window_key not in STATE.windows:
                     STATE.current_window_id += 1
                     window_start = extract_window_start(trade.slug) or trade.timestamp
                     window = Window(
@@ -457,10 +484,10 @@ async def monitor_reference(session: aiohttp.ClientSession):
                         window_start=window_start,
                         first_trade_time=trade.timestamp,
                     )
-                    STATE.windows[cond_id] = window
+                    STATE.windows[window_key] = window
                     log_window_start(window)
 
-                window = STATE.windows[cond_id]
+                window = STATE.windows[window_key]
                 analyze_decision(trade, "REF")
                 window.reference_trades.append(trade)
                 log_trade(trade)
@@ -476,8 +503,9 @@ async def monitor_reference(session: aiohttp.ClientSession):
 # =============================================================================
 
 async def fetch_bot_signals(session: aiohttp.ClientSession) -> List[Trade]:
+    """Fetch bot signals - supports both old and predirectional bot formats."""
     try:
-        url = f"{BOT_SERVER}/arbitrage/api/signals"
+        url = f"{BOT_SERVER}/api/signals"
         async with session.get(url, timeout=5) as resp:
             if resp.status != 200:
                 return []
@@ -489,10 +517,23 @@ async def fetch_bot_signals(session: aiohttp.ClientSession) -> List[Trade]:
     now = time.time()
     cutoff = now - 3600  # Last hour
 
-    for item in data:
+    # Handle response format: {"signals": [...]} or [...]
+    signals = data.get("signals", data) if isinstance(data, dict) else data
+
+    for item in signals:
         try:
             ts_str = item.get("timestamp", "")
+
+            # Support both formats:
+            # Old: condition_id, market_title
+            # New (predirectional): slug (condition_id may be missing)
             cond_id = item.get("condition_id", "")
+            slug = item.get("slug", "") or item.get("market_title", "")
+
+            # If no condition_id, derive from slug
+            if not cond_id and slug:
+                cond_id = f"derived_{slug}"
+
             outcome = item.get("outcome", "")
             trade_id = f"{ts_str}_{cond_id}_{outcome}"
 
@@ -500,8 +541,14 @@ async def fetch_bot_signals(session: aiohttp.ClientSession) -> List[Trade]:
                 continue
             STATE.seen_bot_ids.add(trade_id)
 
+            # Support both formats:
+            # Old: action = "BUY" or "EXECUTE"
+            # New: signal_type = "BIAS_DOMINANT", "BIAS_HEDGE", etc.
             action = item.get("action", "")
-            if action not in ["BUY", "EXECUTE"]:
+            signal_type = item.get("signal_type", "")
+
+            # Accept if has action BUY/EXECUTE OR has signal_type (predirectional)
+            if action not in ["BUY", "EXECUTE"] and not signal_type:
                 continue
 
             if isinstance(ts_str, str):
@@ -515,21 +562,22 @@ async def fetch_bot_signals(session: aiohttp.ClientSession) -> List[Trade]:
             if ts < cutoff:
                 continue
 
-            # Get slug from market_title - extract the actual slug
-            title = item.get("market_title", "")
-            # Try to find the slug pattern
-            slug = ""
-            if "-15m-" in title.lower():
-                slug = title.lower().replace(" ", "-")
-            else:
-                # Try to construct from title
-                slug = title.lower().replace(" ", "-")
+            # Handle slug from different sources
+            if not slug:
+                title = item.get("market_title", "")
+                if "-15m-" in title.lower():
+                    slug = title.lower().replace(" ", "-")
+                else:
+                    slug = title.lower().replace(" ", "-")
 
             if not is_15m_crypto(slug):
                 continue
 
             window_start = extract_window_start(slug)
             window_offset = (ts - window_start) if window_start else 0
+
+            # Support size from different formats
+            size = float(item.get("size", 0) or item.get("size_usd", 0) or item.get("shares", 0))
 
             trade = Trade(
                 timestamp=ts,
@@ -538,11 +586,11 @@ async def fetch_bot_signals(session: aiohttp.ClientSession) -> List[Trade]:
                 outcome=outcome,
                 side="BUY",
                 price=float(item.get("price", 0)),
-                size=float(item.get("size", 0)) if "size" in item else 0,
+                size=size,
                 slug=slug,
                 asset=get_asset(slug),
                 window_offset=window_offset,
-                signal_type=item.get("signal_type", ""),
+                signal_type=signal_type or action,
                 is_15m_crypto=True,
             )
             trades.append(trade)
@@ -562,7 +610,8 @@ async def monitor_bot(session: aiohttp.ClientSession):
                 if not cond_id:
                     continue
 
-                if cond_id not in STATE.windows:
+                window_key = get_window_key(trade.slug) or cond_id
+                if window_key not in STATE.windows:
                     STATE.current_window_id += 1
                     window_start = extract_window_start(trade.slug) or trade.timestamp
                     window = Window(
@@ -573,10 +622,10 @@ async def monitor_bot(session: aiohttp.ClientSession):
                         window_start=window_start,
                         first_trade_time=trade.timestamp,
                     )
-                    STATE.windows[cond_id] = window
+                    STATE.windows[window_key] = window
                     log_window_start(window)
 
-                window = STATE.windows[cond_id]
+                window = STATE.windows[window_key]
                 analyze_decision(trade, "BOT")
                 window.bot_trades.append(trade)
                 log_trade(trade)
