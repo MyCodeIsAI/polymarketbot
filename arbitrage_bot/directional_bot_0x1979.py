@@ -470,7 +470,7 @@ class RefWebSocketMonitor:
         # Determine if this is a meaningful signal
         is_taker = is_ref_taker and side == "BUY"
         
-        logger.info(f"[WS] REF trade detected: {TAKER if is_taker else MAKER} {side} @ ${price:.2f} size={size:.2f}")
+        logger.info(f"[WS] REF trade detected: {'TAKER' if is_taker else 'MAKER'} {side} @ ${price:.2f} size={size:.2f}")
         
         # Convert to format expected by process_trade
         trade_dict = {
@@ -2037,7 +2037,7 @@ async def ref_monitor_loop():
             "asset": trade.asset.upper(),
             "outcome": trade.outcome,
             "slug": trade.slug,
-            "condition_id": trade.condition_id,
+            "conditionId": trade.condition_id,
         }
 
         event = REF_TRACKER.process_trade(trade_dict)
